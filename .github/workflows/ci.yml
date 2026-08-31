@@ -218,12 +218,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Real-model E2E blocked - AI_GATEWAY_API_KEY secret missing
-        if: ${{ !secrets.AI_GATEWAY_API_KEY }}
+        if: ${{ secrets.AI_GATEWAY_API_KEY == '' }}
         run: |
           echo "::warning::e2e-real-model BLOCKED: AI_GATEWAY_API_KEY secret missing. Set it in repo settings and re-run. This is NOT a code failure."
 
       - name: Real-model E2E blocked - NIGHT_WORKER_REPO_TOKEN secret missing
-        if: ${{ secrets.AI_GATEWAY_API_KEY && !secrets.NIGHT_WORKER_REPO_TOKEN }}
+        if: ${{ secrets.AI_GATEWAY_API_KEY != '' && secrets.NIGHT_WORKER_REPO_TOKEN == '' }}
         run: |
           echo "::warning::e2e-real-model BLOCKED: NIGHT_WORKER_REPO_TOKEN secret missing. Set it in repo settings and re-run."
 
