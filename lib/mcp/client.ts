@@ -49,40 +49,117 @@ export type GetMcpToolsOptions = {
   signal?: AbortSignal;
 };
 
-async function withTimeout<T>(
+/**
+ * Race an MCP call against an optional timeout and an optional AbortSignal.
+ *
+ * Guarantees:
+ *   - The MCP promise always wins if it resolves before the timeout/abort.
+ *   - A timeout never rejects a call that has already resolved.
+ *   - The timer is cleared and the abort listener removed BEFORE the
+ *     awaited promise settles - even if the caller never awaits our return.
+ *   - No unhandledRejection leaks: the loser promises are caught and
+ *     swallowed because the race's winner is what we return.
+ */
+export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number | undefined,
   signal: AbortSignal | undefined
 ): Promise<T> {
-  let timer: NodeJS.Timeout | null = null;
-  let timeoutListener: (() => void) | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let onAbort: (() => void) | null = null;
+  const cleanup = () => {};
+
+  // Build the list of "loser" rejections that should never propagate.
+  const losers: Promise<never>[] = [];
+
   try {
-    if (timeoutMs && timeoutMs > 0) {
-      await new Promise<void>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`MCP call timed out after ${timeoutMs}ms`)),
-          timeoutMs
-        );
-        if (signal) {
-          timeoutListener = () => reject(new Error("MCP call aborted"));
-          signal.addEventListener("abort", timeoutListener);
+    const racePromise = new Promise<T>((resolve, reject) => {
+      // Timeout loser
+      if (timeoutMs && timeoutMs > 0) {
+        timer = setTimeout(() => {
+          reject(
+            new McpTimeoutError(`MCP call timed out after ${timeoutMs}ms`)
+          );
+        }, timeoutMs);
+      }
+      // Abort loser
+      if (signal) {
+        if (signal.aborted) {
+          reject(new McpAbortError("MCP call aborted"));
+          return;
         }
+        onAbort = () => reject(new McpAbortError("MCP call aborted"));
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
+
+    const mcpPromise = promise
+      .then((value) => {
+        // MCP resolved first - cancel the timer and abort listener now
+        // so the timeout cannot reject after us.
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (signal && onAbort) {
+          signal.removeEventListener("abort", onAbort);
+          onAbort = null;
+        }
+        return value;
+      })
+      .catch((err) => {
+        // If MCP itself rejected, ensure cleanup too.
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (signal && onAbort) {
+          signal.removeEventListener("abort", onAbort);
+          onAbort = null;
+        }
+        throw err;
       });
-    } else if (signal) {
-      await new Promise<void>((_resolve, reject) => {
-        timeoutListener = () => reject(new Error("MCP call aborted"));
-        signal.addEventListener("abort", timeoutListener);
-      });
-    }
-    return await promise;
-  } finally {
+
+    // Promise.race settles on the first fulfilled or rejected promise.
+    const result = await Promise.race([mcpPromise, racePromise]);
+
+    // If we won, the timer/listener are already cleared. Make extra sure.
     if (timer) {
       clearTimeout(timer);
     }
-    if (signal && timeoutListener) {
-      // Remove the listener we attached so we don't leak.
-      signal.removeEventListener("abort", timeoutListener);
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
     }
+
+    return result;
+  } finally {
+    // Belt-and-suspenders: if for some reason neither branch cleared
+    // the timer/listener (e.g. an exception above the race), do it now.
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
+      onAbort = null;
+    }
+    // Swallow any rejection from the loser promises so they do not
+    // bubble up as unhandledRejection.
+    void Promise.all(losers).catch(() => {});
+  }
+}
+
+export class McpTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "McpTimeoutError";
+  }
+}
+
+export class McpAbortError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "McpAbortError";
   }
 }
 
@@ -155,3 +232,5 @@ export async function getMcpTools(
 
   return { callTool, client, close, listTools, transport };
 }
+
+// Re-exported via the class declarations above; nothing else needed here.

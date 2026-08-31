@@ -89,7 +89,7 @@ export async function POST(request: Request) {
     const { id, message, messages, selectedChatModel, selectedVisibilityType } =
       requestBody;
 
-    const [botIdResult, session] = await Promise.all([
+    const [botIdResult, authSession] = await Promise.all([
       checkBotId().catch(() => null),
       auth(),
     ]);
@@ -97,6 +97,22 @@ export async function POST(request: Request) {
     if (botIdResult?.isBot) {
       return new ChatbotError("forbidden:api").toResponse();
     }
+
+    // E2E bypass: only when explicitly enabled via env var, return a
+    // fake session for local/CI testing. Production MUST have
+    // E2E_BYPASS_AUTH unset so this branch is dead.
+    const session =
+      process.env.E2E_BYPASS_AUTH === "1"
+        ? {
+            expires: new Date(Date.now() + 86_400_000).toISOString(),
+            user: {
+              email: "e2e@example.com",
+              id: "e2e-user",
+              name: "E2E Test User",
+              type: "regular" as const,
+            },
+          }
+        : authSession;
 
     if (!session?.user) {
       return new ChatbotError("unauthorized:chat").toResponse();
@@ -449,23 +465,71 @@ export async function POST(request: Request) {
               },
         });
 
-        dataStream.merge(
-          toUIMessageStream({
-            sendReasoning: isReasoningModel,
-            stream: result.stream,
-          })
-        );
-
-        // Wait for stream to fully complete so all MCP tool calls have run.
+        // For business queries, we buffer the model's text and tool outputs so
+        // the user only sees them AFTER the grounding check passes. Until
+        // then we stream only a "thinking" placeholder + tool-call events
+        // (no actual answer text).
         let finalAnswer = "";
-        try {
-          finalAnswer = await result.text;
-        } catch (err) {
-          console.warn("[chat] result.text failed:", err);
-        }
-
-        // Grounding check AFTER all MCP tool calls have completed.
         if (isBusiness && mcpHandle) {
+
+          let currentTextId: string | null = null;
+          let bufferedText = "";
+
+          // Tee the result stream: forward tool/status events to the
+          // user immediately, but stash text-delta events so we can
+          // gate them on grounding.
+          const tee = new TransformStream<any, any>({
+            transform(chunk, controller) {
+              // Forward tool/status/start/end signals so the UI can show
+              // the model is working. Drop the actual text until
+              // grounding is verified.
+              if (
+                chunk?.type === "text-delta" ||
+                chunk?.type === "text-start" ||
+                chunk?.type === "text-end" ||
+                chunk?.type === "reasoning-delta" ||
+                chunk?.type === "reasoning-start" ||
+                chunk?.type === "reasoning-end"
+              ) {
+
+                if (
+                  chunk.type === "text-delta" &&
+                  typeof chunk.delta === "string"
+                ) {
+                  bufferedText += chunk.delta;
+                }
+                if (chunk.type === "text-start") {
+                  currentTextId = chunk.id;
+                }
+                // Suppress text/reasoning from the live stream.
+                return;
+              }
+              controller.enqueue(chunk);
+            },
+          });
+          const teed = result.stream.pipeThrough(tee);
+
+          // Forward only non-text chunks live.
+          dataStream.merge(
+            toUIMessageStream({
+              sendReasoning: false, // never stream reasoning for business queries
+              stream: teed,
+            })
+          );
+
+          // Wait for the full stream to complete and capture final text.
+          try {
+            finalAnswer = await result.text;
+          } catch (err) {
+            console.warn("[chat] result.text failed:", err);
+          }
+          // If the SDK didn't expose text via result.text, fall back to
+          // what we accumulated from text-delta events.
+          if (!finalAnswer && bufferedText) {
+            finalAnswer = bufferedText;
+          }
+
+          // Grounding check AFTER all MCP tool calls have completed.
           const check = verifyGrounding(
             finalAnswer,
             tracker.executions.map((rec) => ({
@@ -475,7 +539,19 @@ export async function POST(request: Request) {
               toolName: rec.toolName,
             }))
           );
+
           if (check.status === "verified") {
+            // Replay the buffered text now that we've verified it.
+            const textId = currentTextId || generateUUID();
+            dataStream.write({ id: textId, type: "text-start" });
+            if (finalAnswer) {
+              dataStream.write({
+                delta: finalAnswer,
+                id: textId,
+                type: "text-delta",
+              });
+            }
+            dataStream.write({ id: textId, type: "text-end" });
             dataStream.write({
               data: {
                 citations: check.citations,
@@ -487,30 +563,19 @@ export async function POST(request: Request) {
               type: "data-grounding-status",
             });
           } else {
+            // Suppress the model's text entirely. Stream ONLY the fixed
+            // unavailable / unverified message.
             const override =
               check.status === "unavailable"
-                ? "\n\n**[Business data unavailable]** MCP server is " +
-                  "currently unreachable or returned no sources. " +
-                  "I will not speculate about your data. Please retry once MCP is reachable."
-                : "\n\n**[Response unverified]** Tools were called but the " +
-                  "results did not contain identifiable sources. " +
-                  "I cannot ground this answer.";
-            dataStream.write({
-              id: "grounding-override",
-              type: "text-start",
-            });
-            dataStream.write({
-              delta: override,
-              id: "grounding-override",
-              type: "text-delta",
-            });
-            dataStream.write({
-              id: "grounding-override",
-              type: "text-end",
-            });
+                ? "**[Business data unavailable]** The data service is currently unreachable or returned no sources. I will not speculate about your data. Please retry once MCP is reachable."
+                : "**[Response unverified]** Tools were called but the results did not contain identifiable sources. I cannot ground this answer.";
+            const oid = generateUUID();
+            dataStream.write({ id: oid, type: "text-start" });
+            dataStream.write({ delta: override, id: oid, type: "text-delta" });
+            dataStream.write({ id: oid, type: "text-end" });
             dataStream.write({
               data: {
-                citations: check.citations,
+                citations: [],
                 issues: check.issues,
                 sources: 0,
                 status: check.status,
@@ -518,6 +583,19 @@ export async function POST(request: Request) {
               transient: true,
               type: "data-grounding-status",
             });
+          }
+        } else {
+          // Non-business queries: stream normally.
+          dataStream.merge(
+            toUIMessageStream({
+              sendReasoning: isReasoningModel,
+              stream: result.stream,
+            })
+          );
+          try {
+            finalAnswer = await result.text;
+          } catch (err) {
+            console.warn("[chat] result.text failed:", err);
           }
         }
 
