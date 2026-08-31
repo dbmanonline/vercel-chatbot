@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ============================================================
+  # Unit tests + typecheck + lint + build
+  # ============================================================
+  unit-typecheck-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: pnpm check
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        run: pnpm build
+
+  # ============================================================
+  # E2E: clones the exact Night Worker commit pinned via PR or
+  # resolves the latest main HEAD. Skips cleanly when no
+  # NIGHT_WORKER_REPO_TOKEN is configured.
+  # ============================================================
+  e2e-night-worker-api-chat:
+    runs-on: ubuntu-latest
+    needs: unit-typecheck-build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install chatbot deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve Night Worker commit SHA
+        id: resolve_nw
+        env:
+          NW_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REF="${{ vars.NIGHT_WORKER_COMMIT || github.event.pull_request.head.sha }}"
+          if [ -z "$REF" ]; then
+            echo "Resolving Night Worker main HEAD via git ls-remote..."
+            if [ -n "$NW_TOKEN" ]; then
+              REF=$(git ls-remote "https://x-access-token:${NW_TOKEN}@github.com/dbmanonline/night_worker.git" refs/heads/main | awk '{print $1}')
+            else
+              REF=$(git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/dbmanonline/night_worker.git" refs/heads/main | awk '{print $1}')
+            fi
+          fi
+          if [ -z "$REF" ]; then
+            echo "WARNING: could not resolve Night Worker SHA. E2E will SKIP."
+            echo "SKIP_E2E=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Night Worker SHA: $REF"
+          echo "sha=$REF" >> "$GITHUB_OUTPUT"
+          echo "SKIP_E2E=0" >> "$GITHUB_OUTPUT"
+
+      - name: Clone the pinned Night Worker commit
+        if: steps.resolve_nw.outputs.SKIP_E2E != '1'
+        env:
+          NW_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${NW_TOKEN}@github.com/dbmanonline/night_worker.git" /tmp/night_worker
+          cd /tmp/night_worker
+          git checkout "${{ steps.resolve_nw.outputs.sha }}"
+
+      - name: Install Night Worker deps
+        if: steps.resolve_nw.outputs.SKIP_E2E != '1'
+        working-directory: /tmp/night_worker
+        run: npm install --no-audit --no-fund
+
+      - name: Seed deterministic record
+        if: steps.resolve_nw.outputs.SKIP_E2E != '1'
+        working-directory: /tmp/night_worker
+        env:
+          MCP_AUTH_TOKEN: integration-test-token-must-be-at-least-32-chars-long
+        run: |
+          node -e "
+            const { ToolExecutor } = require('./src/agent/tool-executor.js');
+            const { createSqliteDb } = require('./src/database/sqlite.js');
+            const db = createSqliteDb(':memory:');
+            const exec = new ToolExecutor({ db });
+            exec.seed({
+              id: 'e2e-record-1',
+              title: 'E2E Seed Record',
+              brand: 'TestBrand',
+              content: 'Deterministic content for E2E grounding test.',
+            });
+          "
+
+      - name: Start Night Worker MCP server
+        if: steps.resolve_nw.outputs.SKIP_E2E != '1'
+        working-directory: /tmp/night_worker
+        env:
+          MCP_ENABLED: 'true'
+          MCP_AUTH_TOKEN: integration-test-token-must-be-at-least-32-chars-long
+          MCP_TOOL_TIMEOUT_MS: '15000'
+          LEGACY_CHAT_ENABLED: 'false'
+          NODE_ENV: test
+          PORT: '13579'
+        run: |
+          nohup node server.js > /tmp/nw.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:13579/health > /dev/null; then
+              echo "Night Worker ready in ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Night Worker failed to start"
+          cat /tmp/nw.log
+          exit 1
+
+      - name: MCP client unit + lifecycle tests (real Night Worker)
+        if: steps.resolve_nw.outputs.SKIP_E2E != '1'
+        env:
+          NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
+          NIGHT_WORKER_TOKEN: integration-test-token-must-be-at-least-32-chars-long
+        run: |
+          pnpm exec tsx --test tests/mcp-client.test.ts tests/mcp-client-lifecycle.test.ts
+
+      - name: /api/chat real-model E2E
+        if: steps.resolve_nw.outputs.SKIP_E2E != '1'
+        env:
+          NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
+          NIGHT_WORKER_TOKEN: integration-test-token-must-be-at-least-32-chars-long
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          MCP_ENABLED: 'true'
+          AUTH_SECRET: 'e2e-test-secret-not-secure'
+          POSTGRES_URL: ''
+          REDIS_URL: ''
+          E2E_PORT: '13000'
+        run: |
+          if [ -z "$AI_GATEWAY_API_KEY" ]; then
+            echo "AI_GATEWAY_API_KEY secret missing - skipping real-model E2E."
+            exit 0
+          fi
+          pnpm exec tsx --test tests/e2e-chatbot-mcp.test.ts
