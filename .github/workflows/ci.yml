@@ -203,6 +203,9 @@ jobs:
   e2e-real-model:
     runs-on: ubuntu-latest
     needs: [unit-typecheck-build, e2e-night-worker]
+    env:
+      AI_GATEWAY_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      NIGHT_WORKER_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -218,12 +221,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Real-model E2E blocked - AI_GATEWAY_API_KEY secret missing
-        if: ${{ secrets.AI_GATEWAY_API_KEY == '' }}
+        if: env.AI_GATEWAY_KEY == ''
         run: |
           echo "::warning::e2e-real-model BLOCKED: AI_GATEWAY_API_KEY secret missing. Set it in repo settings and re-run. This is NOT a code failure."
 
       - name: Real-model E2E blocked - NIGHT_WORKER_REPO_TOKEN secret missing
-        if: ${{ secrets.AI_GATEWAY_API_KEY != '' && secrets.NIGHT_WORKER_REPO_TOKEN == '' }}
+        if: env.AI_GATEWAY_KEY != '' && env.NIGHT_WORKER_TOKEN == ''
         run: |
           echo "::warning::e2e-real-model BLOCKED: NIGHT_WORKER_REPO_TOKEN secret missing. Set it in repo settings and re-run."
 
