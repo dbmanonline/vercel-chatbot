@@ -25,6 +25,13 @@ export type ChatModel = {
 
 export const chatModels: ChatModel[] = [
   {
+    description: "Claude Opus 5 via AgentShop247 (fast routing)",
+    gatewayOrder: ["agentshop247"],
+    id: "agent-shop/claude-opus-5",
+    name: "Claude Opus 5 (AgentShop)",
+    provider: "agent-shop",
+  },
+  {
     description: "Fast and capable model with tool use",
     gatewayOrder: ["bedrock", "deepinfra"],
     id: "deepseek/deepseek-v3.2",

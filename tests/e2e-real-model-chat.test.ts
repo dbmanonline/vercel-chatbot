@@ -27,7 +27,10 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY ?? "";
 // Reject placeholder/fake keys so the test fails fast instead of hanging.
-const IS_FAKE_KEY = !GATEWAY_KEY || GATEWAY_KEY === "placeholder-agent-shop-key";
+// E2E_PROXY_KEY activates the local proxy fallback (no AI Gateway key needed).
+const IS_FAKE_KEY =
+  (!GATEWAY_KEY || GATEWAY_KEY === "placeholder-agent-shop-key") &&
+  !process.env.E2E_PROXY_KEY;
 const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579/mcp";
 const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
@@ -66,6 +69,8 @@ function startNextServer(): ChildProcess {
         AUTH_SECRET:
           process.env.AUTH_SECRET || "e2e-auth-secret-must-be-long-enough",
         E2E_BYPASS_AUTH: "1",
+        E2E_PROXY_URL: process.env.E2E_PROXY_URL ?? "http://localhost:20128",
+        E2E_PROXY_KEY: process.env.E2E_PROXY_KEY ?? "",
         NIGHT_WORKER_TOKEN: MCP_TOKEN,
         NIGHT_WORKER_URL: MCP_URL,
       },
@@ -119,7 +124,7 @@ test("E2E /api/chat: real model calls MCP and returns grounded answer (status=ve
           role: "user",
         },
       ],
-      selectedChatModel: "openai/gpt-4o-mini",
+      selectedChatModel: "agent-shop/claude-opus-5",
       selectedVisibilityType: "private",
     });
 
