@@ -236,8 +236,6 @@ export function extractClaims(answer: string): string[] {
   const sentences = answer.split(/[.!?\n]+/);
   for (const s of sentences) {
     const words = s.trim().split(/\s+/);
-    // biome-ignore lint/style/useForOf: indexed access is needed to peek
-    // at the next word for multi-word proper noun detection.
     for (let i = 0; i < words.length; i += 1) {
       const w = words[i].replace(/[^A-Za-zÀ-ỹ0-9-]/g, "");
       if (!w) {

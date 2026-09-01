@@ -211,7 +211,7 @@ test("MCP client uses per-call timeoutMs, not just constructor timeout", async (
     // Call with a short timeout — should timeout, not wait 60s.
     await handle.callTool(
       "aggregate_data",
-      { metric: "total_records", limit: 5 },
+      { limit: 5, metric: "total_records" },
       { timeoutMs: 50 } // very short timeout
     );
     assert.fail("Should have timed out");
