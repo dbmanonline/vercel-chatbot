@@ -200,7 +200,7 @@ jobs:
 
       # ----- Real-model /api/chat E2E: requires AI_GATEWAY_API_KEY -----
       - name: Real-model /api/chat E2E
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'run' && secrets.AI_GATEWAY_API_KEY != ''
+        if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
