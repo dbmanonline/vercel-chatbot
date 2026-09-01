@@ -121,51 +121,30 @@ const createMockTitleModel = (): LanguageModel =>
 export const chatModel = createMockModel();
 export const titleModel = createMockTitleModel();
 
-/** E2E local: routes model through the local proxy instead of Vercel AI Gateway. */
+/**
+ * E2E local: routes model through the local proxy (localhost:20128)
+ * instead of Vercel AI Gateway. Uses streaming SSE to match real behavior.
+ *
+ * Set E2E_PROXY_URL and E2E_PROXY_KEY env vars before importing this.
+ */
 export function createE2ELanguageModel(modelId: string): LanguageModel {
   const baseUrl = process.env.E2E_PROXY_URL ?? "http://localhost:20128";
   const apiKey = process.env.E2E_PROXY_KEY ?? "";
 
-  async function nonStreamFetch(messages: unknown, tools?: unknown) {
-    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
-      body: JSON.stringify({ messages, model: modelId, stream: false, tools }),
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      method: "POST",
-    });
-    if (!response.ok) {
-      throw new Error(`E2E proxy error ${response.status}`);
-    }
-    const data = await response.json() as {
-      choices: Array<{
-        message: { content: string; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }> };
-        finish_reason: string;
-      }>;
-      usage?: { prompt_tokens: number; completion_tokens: number };
-    };
-    const msg = data.choices[0]?.message;
-    const toolCalls = msg?.tool_calls?.map((tc) => ({
-      function: { arguments: tc.function.arguments, name: tc.function.name },
-      id: tc.id,
-      type: tc.type as "function",
-    }));
-    return {
-      content: toolCalls
-        ? [{ args: toolCalls[0].function.arguments, toolCallId: toolCalls[0].id, toolName: toolCalls[0].function.name, type: "tool-call" as const }]
-        : [{ text: msg?.content ?? "", type: "text" as const }],
-      finishReason: (data.choices[0]?.finish_reason ?? "stop") as "stop",
-      modelId,
-      provider: "e2e-proxy",
-      request: { body: {}, headers: {} },
-      usage: { inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: data.usage?.prompt_tokens ?? 0, total: data.usage?.prompt_tokens ?? 0 }, outputTokens: { reasoning: 0, text: data.usage?.completion_tokens ?? 0, total: data.usage?.completion_tokens ?? 0 } },
-      warnings: [],
-    };
-  }
+  const finishChunk = {
+    finishReason: "stop" as const,
+    type: "finish" as const,
+    usage: {
+      inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 0, total: 0 },
+      outputTokens: { reasoning: 0, text: 0, total: 0 },
+    },
+  };
 
-  async function* streamFetch(messages: unknown, tools?: unknown): AsyncGenerator<unknown> {
-    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
+  async function* streamEvents(
+    messages: unknown,
+    tools?: unknown,
+  ): AsyncGenerator<unknown> {
+    const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
       body: JSON.stringify({ messages, model: modelId, stream: true, tools }),
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -173,42 +152,124 @@ export function createE2ELanguageModel(modelId: string): LanguageModel {
       },
       method: "POST",
     });
-    if (!response.ok) { throw new Error(`E2E proxy error ${response.status}`); }
-    const reader = (response.body as ReadableStream).getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) { break; }
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) { continue; }
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") {
-          yield { finishReason: "stop" as const, type: "finish" as const, usage: { inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 0, total: 0 }, outputTokens: { reasoning: 0, text: 0, total: 0 } }
+    if (!resp.ok) throw new Error(`E2E proxy error ${resp.status}`);
+
+    const reader = (resp.body as ReadableStream).getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+
+    try {
+      while (true) {
+        const result = await reader.read();
+        if (result.done) break;
+
+        buf += dec.decode(result.value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+
+        for (const rawLine of lines) {
+          if (!rawLine.startsWith("data: ")) continue;
+          const txt = rawLine.slice(6).trim();
+          if (txt === "[DONE]") {
+            yield finishChunk;
+            continue;
+          }
+
+          let parsed: Record<string, unknown> = {};
+          try {
+            parsed = JSON.parse(txt) as Record<string, unknown>;
+          } catch (_) {
+            continue;
+          }
+
+          const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
+          const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
+
+          if (delta?.role) yield { id: parsed.id, type: "start" as const };
+          if (typeof delta?.content === "string") {
+            yield { delta: delta.content, id: parsed.id, type: "text-delta" as const };
+          }
+          const calls = delta?.tool_calls as Array<Record<string, unknown>> | undefined;
+          if (calls?.length) {
+            const fc = calls[0].function as Record<string, string>;
+            yield {
+              args: fc.arguments,
+              id: parsed.id,
+              toolCallId: calls[0].id,
+              toolName: fc.name,
+              type: "tool-call" as const,
+            };
+          }
+          if (choices?.[0]?.finish_reason) yield finishChunk;
         }
-        try {
-          const chunk = JSON.parse(data) as {
-            id: string; choices: Array<{
-              delta: { role?: string; content?: string; tool_calls?: Array<{ index: number; id: string; type: string; function: { name: string; arguments: string } }> };
-              finish_reason?: string;
-            }>;
-          };
-          const delta = chunk.choices[0]?.delta;
-          if (delta?.role) { yield { id: chunk.id, type: "start" as const }; }
-          if (delta?.content) { yield { delta: delta.content, id: chunk.id, type: "text-delta" as const }; }
-          if (delta?.tool_calls?.[0]) {
-            const tc = delta.tool_calls[0];
-            yield { args: tc.function.arguments, id: chunk.id, toolCallId: tc.id, toolName: tc.function.name, type: "tool-call" as const };
-          }
-          if (chunk.choices[0]?.finish_reason) {
-            yield { finishReason: chunk.choices[0].finish_reason as "stop", type: "finish" as const, usage: { inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 0, total: 0 }, outputTokens: { reasoning: 0, text: 0, total: 0 } }
-          }
-        } catch (_) { /* skip */ }
       }
+    } finally {
+      reader.releaseLock();
     }
+  }
+
+  async function nonStreamFetch(messages: unknown, tools?: unknown) {
+    const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
+      body: JSON.stringify({ messages, model: modelId, stream: false, tools }),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+    if (!resp.ok) throw new Error(`E2E proxy error ${resp.status}`);
+    const data = await resp.json() as {
+      choices: Array<{
+        message: {
+          content: string;
+          tool_calls?: Array<{
+            id: string;
+            type: string;
+            function: { name: string; arguments: string };
+          }>;
+        };
+        finish_reason: string;
+      }>;
+      usage?: { prompt_tokens: number; completion_tokens: number };
+    };
+
+    const msg = data.choices[0]?.message;
+    const calls = msg?.tool_calls?.map((tc) => ({
+      function: { arguments: tc.function.arguments, name: tc.function.name },
+      id: tc.id,
+      type: tc.type as "function",
+    }));
+
+    return {
+      content: calls
+        ? [
+            {
+              args: calls[0].function.arguments,
+              toolCallId: calls[0].id,
+              toolName: calls[0].function.name,
+              type: "tool-call" as const,
+            },
+          ]
+        : [{ text: msg?.content ?? "", type: "text" as const }],
+      finishReason: (data.choices[0]?.finish_reason ?? "stop") as "stop",
+      modelId,
+      provider: "e2e-proxy",
+      request: { body: {}, headers: {} },
+      usage: {
+        inputTokens: {
+          cacheRead: 0,
+          cacheWrite: 0,
+          noCache: data.usage?.prompt_tokens ?? 0,
+          total: data.usage?.prompt_tokens ?? 0,
+        },
+        outputTokens: {
+          reasoning: 0,
+          text: data.usage?.completion_tokens ?? 0,
+          total: data.usage?.completion_tokens ?? 0,
+        },
+      },
+      warnings: [],
+    };
   }
 
   return {
@@ -216,15 +277,17 @@ export function createE2ELanguageModel(modelId: string): LanguageModel {
     doGenerate: async ({ prompt, tools }: { prompt: unknown; tools?: unknown }) =>
       nonStreamFetch(prompt, tools),
     doStream: ({ prompt, tools }: { prompt: unknown; tools?: unknown }) => ({
-      stream: new ReadableStream({ async start(controller) {
-        try {
-          for await (const event of streamFetch(prompt, tools)) {
-            controller.enqueue(event);
+      stream: new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const ev of streamEvents(prompt, tools)) {
+              controller.enqueue(ev);
+            }
+          } finally {
+            controller.close();
           }
-        } finally {
-          controller.close();
-        }
-      } }),
+        },
+      }),
     }),
     modelId,
     provider: "e2e-proxy",
