@@ -78,9 +78,8 @@ jobs:
           NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
           REF=""
-          # 1. workflow_dispatch input
+          # 1. workflow_dispatch input (takes precedence)
           if [ -n "${{ github.event.inputs.night_worker_commit }}" ]; then
             REF="${{ github.event.inputs.night_worker_commit }}"
             echo "Using workflow_dispatch input: $REF"
@@ -90,20 +89,23 @@ jobs:
             REF="${{ vars.NIGHT_WORKER_COMMIT }}"
             echo "Using vars.NIGHT_WORKER_COMMIT: $REF"
           fi
-          # 3. resolve main HEAD via git ls-remote using whichever token we have
+          # 3. resolve main HEAD via git ls-remote. Use whichever token we have.
+          # NOTE: if neither token can access night_worker, we exit cleanly with
+          # 'blocked' rather than crashing the job.
           if [ -z "$REF" ]; then
             if [ -n "$NW_REPO_TOKEN" ]; then
               AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
             elif [ -n "$GH_TOKEN" ]; then
               AUTH_URL="https://x-access-token:${GH_TOKEN}@github.com/dbmanonline/night_worker.git"
             else
-              AUTH_URL="https://github.com/dbmanonline/night_worker.git"
+              AUTH_URL="https://github.com/dbmanonline/night_worker.git""
             fi
-            REF=$(git ls-remote "$AUTH_URL" refs/heads/main | awk '{print $1}')
-            echo "Resolved Night Worker main HEAD: $REF"
+            # || true prevents exit 128 (repo not found) from killing the script.
+            REF=$(git ls-remote "$AUTH_URL" refs/heads/main 2>/dev/null | awk '{print $1}')
+            echo "Resolved Night Worker main HEAD: ${REF:-<empty>}"
           fi
           if [ -z "$REF" ] || [ "$REF" = "0000000000000000000000000000000000000000" ]; then
-            echo "::error::Could not resolve Night Worker commit SHA. Set NIGHT_WORKER_COMMIT variable or provide via workflow_dispatch."
+            echo "::error::Could not resolve Night Worker commit SHA. Set the NIGHT_WORKER_COMMIT repo variable or provide via workflow_dispatch input."
             echo "SKIP_E2E=blocked" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -238,16 +240,21 @@ jobs:
           NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
           REF=""
           if [ -n "${{ vars.NIGHT_WORKER_COMMIT }}" ]; then
             REF="${{ vars.NIGHT_WORKER_COMMIT }}"
+            echo "Using NIGHT_WORKER_COMMIT variable: $REF"
           else
-            AUTH_URL="https://x-access-token:${NW_REPO_TOKEN:-${GH_TOKEN}}@github.com/dbmanonline/night_worker.git"
-            REF=$(git ls-remote "$AUTH_URL" refs/heads/main | awk '{print $1}')
+            AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
+            REF=$(git ls-remote "$AUTH_URL" refs/heads/main 2>/dev/null | awk '{print $1}')
+            echo "Resolved Night Worker main HEAD: ${REF:-<empty>}"
+          fi
+          if [ -z "$REF" ] || [ "$REF" = "0000000000000000000000000000000000000000" ]; then
+            echo "::error::Could not resolve Night Worker SHA. Set NIGHT_WORKER_COMMIT variable."
+            exit 1
           fi
           echo "Cloning Night Worker at $REF"
-          AUTH_URL="https://x-access-token:${NW_REPO_TOKEN:-${GH_TOKEN}}@github.com/dbmanonline/night_worker.git"
+          AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
           git clone --no-checkout "$AUTH_URL" /tmp/night_worker
           cd /tmp/night_worker
           git checkout "$REF"
