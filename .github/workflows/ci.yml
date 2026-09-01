@@ -238,6 +238,7 @@ jobs:
       # requires the MCP server to be reachable from inside Next.js
       # dev). Clone pinned commit if available.
       - name: Clone Night Worker for real-model E2E
+        if: ${{ env.AI_GATEWAY_KEY && env.NIGHT_WORKER_TOKEN }}
         env:
           NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -262,10 +263,12 @@ jobs:
           git checkout "$REF"
 
       - name: Install Night Worker deps
+        if: ${{ env.AI_GATEWAY_KEY && env.NIGHT_WORKER_TOKEN }}
         working-directory: /tmp/night_worker
         run: npm install --no-audit --no-fund
 
       - name: Start Night Worker MCP server
+        if: ${{ env.AI_GATEWAY_KEY && env.NIGHT_WORKER_TOKEN }}
         working-directory: /tmp/night_worker
         env:
           MCP_ENABLED: 'true'
@@ -288,6 +291,7 @@ jobs:
           exit 1
 
       - name: Real-model /api/chat E2E
+        if: ${{ env.AI_GATEWAY_KEY && env.NIGHT_WORKER_TOKEN }}
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
