@@ -238,12 +238,18 @@ jobs:
 
       # Night Worker may already be running from e2e-night-worker job.
       # Only clone/start if NIGHT_WORKER_REPO_TOKEN is available.
-      - name: Clone Night Worker for real-model E2E
-        id: nw_cloned
+      - name: Clone + install + start Night Worker (if token available)
+        id: nw_setup
         env:
           NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
-        if: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
         run: |
+          # No token: assume Night Worker already running from e2e-night-worker
+          if [ -z "$NW_REPO_TOKEN" ]; then
+            echo "No NIGHT_WORKER_REPO_TOKEN — assuming Night Worker already running"
+            exit 0
+          fi
+
+          # Clone
           REF=""
           if [ -n "${{ vars.NIGHT_WORKER_COMMIT }}" ]; then
             REF="${{ vars.NIGHT_WORKER_COMMIT }}"
@@ -252,35 +258,19 @@ jobs:
             REF=$(git ls-remote "$AUTH_URL" refs/heads/main 2>/dev/null | awk '{print $1}')
           fi
           if [ -z "$REF" ] || [ "$REF" = "0000000000000000000000000000000000000000" ]; then
-            echo "Warning: Could not resolve Night Worker SHA"
+            echo "Warning: Could not resolve Night Worker SHA — skipping"
             exit 0
           fi
-          AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
-          git clone --no-checkout "$AUTH_URL" /tmp/night_worker
+          echo "Cloning Night Worker at $REF"
+          git clone --no-checkout "https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git" /tmp/night_worker
           cd /tmp/night_worker
           git checkout "$REF"
 
-      - name: Install Night Worker deps
-        if: steps.nw_cloned.outcome == 'success'
-        working-directory: /tmp/night_worker
-        run: npm install --no-audit --no-fund || true
+          # Install
+          npm install --no-audit --no-fund
 
-      - name: Start Night Worker MCP server (if cloned above)
-        if: steps.nw_cloned.outcome == 'success'
-        working-directory: /tmp/night_worker
-        env:
-          MCP_ENABLED: 'true'
-          MCP_AUTH_TOKEN: integration-test-token-must-be-at-least-32-chars-long
-          MCP_TOOL_TIMEOUT_MS: '15000'
-          LEGACY_CHAT_ENABLED: 'false'
-          NODE_ENV: test
-          PORT: '13579'
-        run: |
-          if [ ! -d "/tmp/night_worker/node_modules" ]; then
-            echo "Night Worker not cloned — skipping start"
-            exit 0
-          fi
-          nohup node server.js > /tmp/nw.log 2>&1 &
+          # Start
+          MCP_ENABLED=true MCP_AUTH_TOKEN=integration-test-token-must-be-at-least-32-chars-long MCP_TOOL_TIMEOUT_MS=15000 LEGACY_CHAT_ENABLED=false NODE_ENV=test PORT=13579 nohup node server.js > /tmp/nw.log 2>&1 &
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:13579/health > /dev/null; then
               echo "Night Worker ready in ${i}s"
@@ -288,7 +278,7 @@ jobs:
             fi
             sleep 1
           done
-          echo "Warning: Night Worker failed to start or already running"
+          echo "Warning: Night Worker failed to start"
           cat /tmp/nw.log || true
 
       - name: Real-model /api/chat E2E
