@@ -78,6 +78,11 @@ jobs:
           NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Set defaults FIRST — ensures the step always succeeds and later
+          # steps can check the outputs even when git ls-remote fails.
+          echo "sha=unknown" >> "$GITHUB_OUTPUT"
+          echo "SKIP_E2E=blocked" >> "$GITHUB_OUTPUT"
+
           REF=""
           # 1. workflow_dispatch input (takes precedence)
           if [ -n "${{ github.event.inputs.night_worker_commit }}" ]; then
@@ -90,30 +95,25 @@ jobs:
             echo "Using vars.NIGHT_WORKER_COMMIT: $REF"
           fi
           # 3. resolve main HEAD via git ls-remote. Use whichever token we have.
-          # NOTE: if neither token can access night_worker, we exit cleanly with
-          # 'blocked' rather than crashing the job.
+          # NOTE: if neither token can access night_worker, outputs already default
+          # to 'blocked' above so the step succeeds.
           if [ -z "$REF" ]; then
             if [ -n "$NW_REPO_TOKEN" ]; then
               AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
             elif [ -n "$GH_TOKEN" ]; then
               AUTH_URL="https://x-access-token:${GH_TOKEN}@github.com/dbmanonline/night_worker.git"
             else
-              AUTH_URL="https://github.com/dbmanonline/night_worker.git""
+              AUTH_URL="https://github.com/dbmanonline/night_worker.git"
             fi
-            # || true prevents exit 128 (repo not found) from killing the script.
             REF=$(git ls-remote "$AUTH_URL" refs/heads/main 2>/dev/null | awk '{print $1}')
             echo "Resolved Night Worker main HEAD: ${REF:-<empty>}"
           fi
-          if [ -z "$REF" ] || [ "$REF" = "0000000000000000000000000000000000000000" ]; then
-            echo "::warning::Could not resolve Night Worker commit SHA. Set NIGHT_WORKER_COMMIT repo variable or workflow_dispatch input to pin it."
-            echo "SKIP_E2E=blocked" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ -n "$REF" ] && [ "$REF" != "0000000000000000000000000000000000000000" ]; then
+            echo "Night Worker SHA: $REF"
+            echo "sha=$REF" > "$GITHUB_OUTPUT"
+            echo "SKIP_E2E=run" > "$GITHUB_OUTPUT"
           fi
-          echo "Night Worker SHA: $REF"
-          echo "sha=$REF" >> "$GITHUB_OUTPUT"
-          echo "SKIP_E2E=run" >> "$GITHUB_OUTPUT"
-
-      # ----- Block cleanly when SHA/token unavailable -----
+# ----- Block cleanly when SHA/token unavailable -----
       - name: E2E blocked - cannot reach Night Worker
         if: steps.resolve_nw.outputs.SKIP_E2E == 'blocked'
         run: |
