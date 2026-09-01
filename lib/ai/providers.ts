@@ -2,20 +2,19 @@ import { customProvider, gateway } from "ai";
 import { isTestEnvironment } from "../constants";
 import { titleModel } from "./models";
 
-export const myProvider = isTestEnvironment
-  ? (() => {
-      const {
-        chatModel,
-        titleModel: mockTitleModel,
-      } = require("./models.mock");
-      return customProvider({
-        languageModels: {
-          "chat-model": chatModel,
-          "title-model": mockTitleModel,
-        },
-      });
-    })()
-  : null;
+export const myProvider = (() => {
+  const { chatModel, titleModel: mockTitleModel } = require("./models.mock");
+  const { createE2ELanguageModel } = require("./models.mock");
+  return customProvider({
+    languageModels: {
+      "agent-shop/claude-opus-5": createE2ELanguageModel(
+        "agent-shop/claude-opus-5"
+      ),
+      "chat-model": chatModel,
+      "title-model": mockTitleModel,
+    },
+  });
+})();
 
 export function getLanguageModel(modelId: string) {
   if (isTestEnvironment && myProvider) {
