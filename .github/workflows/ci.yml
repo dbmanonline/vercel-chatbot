@@ -223,14 +223,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Real-model E2E blocked - AI_GATEWAY_API_KEY secret missing
-        if: ${{ !env.AI_GATEWAY_KEY }}
+        if: ${{ !env.AI_GATEWAY_KEY || env.AI_GATEWAY_KEY == '' }}
         run: |
           echo "::warning::e2e-real-model BLOCKED: AI_GATEWAY_API_KEY secret missing. Set it in repo settings and re-run. This is NOT a code failure."
+          exit 0
 
       - name: Real-model E2E blocked - NIGHT_WORKER_REPO_TOKEN secret missing
         if: ${{ env.AI_GATEWAY_KEY && !env.NIGHT_WORKER_TOKEN }}
         run: |
           echo "::warning::e2e-real-model BLOCKED: NIGHT_WORKER_REPO_TOKEN secret missing. Set it in repo settings and re-run."
+          exit 0
 
       # Clone + start Night Worker in this job (real-model E2E
       # requires the MCP server to be reachable from inside Next.js
