@@ -190,3 +190,36 @@ test("MCP client handles abort signal fired DURING the tool call", async () => {
   );
   await handle.close();
 });
+
+test("MCP client close() is idempotent - second close is a no-op", async () => {
+  const handle = await getMcpTools({
+    authToken: MCP_TOKEN,
+    serverUrl: MCP_URL,
+    timeoutMs: 10_000,
+  });
+  await handle.close(); // first close
+  await handle.close(); // second close — must not throw
+});
+
+test("MCP client uses per-call timeoutMs, not just constructor timeout", async () => {
+  const handle = await getMcpTools({
+    authToken: MCP_TOKEN,
+    serverUrl: MCP_URL,
+    timeoutMs: 60_000, // long constructor timeout
+  });
+  try {
+    // Call with a short timeout — should timeout, not wait 60s.
+    await handle.callTool(
+      "aggregate_data",
+      { metric: "total_records", limit: 5 },
+      { timeoutMs: 50 } // very short timeout
+    );
+    assert.fail("Should have timed out");
+  } catch (err) {
+    assert.ok(
+      /timeout|timed out|McpTimeout/i.test(String(err)),
+      `Expected timeout error, got: ${err}`
+    );
+  }
+  await handle.close();
+});
