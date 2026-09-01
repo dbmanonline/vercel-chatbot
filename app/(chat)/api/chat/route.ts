@@ -163,7 +163,10 @@ export async function POST(request: Request) {
       } catch {
         messagesFromDb = [];
       }
-    } else if (message?.role === "user" && process.env.E2E_BYPASS_AUTH !== "1") {
+    } else if (
+      message?.role === "user" &&
+      process.env.E2E_BYPASS_AUTH !== "1"
+    ) {
       await saveChat({
         id,
         title: "New chat",
@@ -630,7 +633,9 @@ export async function POST(request: Request) {
       generateId: generateUUID,
       onEnd: async ({ messages: finishedMessages }) => {
         const skipDb = process.env.E2E_BYPASS_AUTH === "1";
-        if (skipDb) return;
+        if (skipDb) {
+          return;
+        }
         try {
           if (isToolApprovalFlow) {
             await Promise.all(
@@ -730,8 +735,8 @@ export async function POST(request: Request) {
     }
 
     console.error("Unhandled error in chat API:", {
-      name: (error as Error).name,
       message: (error as Error).message,
+      name: (error as Error).name,
       stack: (error as Error).stack,
       vercelId,
     });
