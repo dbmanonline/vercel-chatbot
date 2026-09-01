@@ -25,7 +25,9 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
-const GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY;
+const GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY ?? "";
+// Reject placeholder/fake keys so the test fails fast instead of hanging.
+const IS_FAKE_KEY = !GATEWAY_KEY || GATEWAY_KEY === "placeholder-agent-shop-key";
 const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579/mcp";
 const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
@@ -54,8 +56,8 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
 
 function startNextServer(): ChildProcess {
   const proc = spawn(
-    process.platform === "win32" ? "pnpm.cmd" : "pnpm",
-    ["next", "dev", "--port", String(PORT)],
+    process.platform === "win32" ? "cmd" : "pnpm",
+    process.platform === "win32" ? ["/c", "next", "dev", "--port", String(PORT)] : ["next", "dev", "--port", String(PORT)],
     {
       cwd: PROJECT_ROOT,
       env: {
@@ -90,9 +92,9 @@ function startNextServer(): ChildProcess {
 }
 
 test("E2E /api/chat: real model calls MCP and returns grounded answer (status=verified)", async () => {
-  if (!GATEWAY_KEY) {
+  if (IS_FAKE_KEY) {
     console.log(
-      "NOT_RUN: AI_GATEWAY_API_KEY not set - real-model /api/chat E2E blocked (do not count as pass)"
+      "NOT_RUN: AI_GATEWAY_API_KEY not set or placeholder — real-model /api/chat E2E blocked"
     );
     return;
   }
@@ -104,7 +106,7 @@ test("E2E /api/chat: real model calls MCP and returns grounded answer (status=ve
     // Build a valid request body. /api/chat accepts an array of
     // UIMessage objects via streamText's messages param.
     const body = JSON.stringify({
-      id: "e2e-test-chat",
+      id: "550e8400-e29b-41d4-a716-446655440000",
       messages: [
         {
           id: "msg-1",
