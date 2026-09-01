@@ -124,7 +124,7 @@ jobs:
       - name: Clone the pinned Night Worker commit
         if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
         env:
-          NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
         run: |
           AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
           git clone --no-checkout "$AUTH_URL" /tmp/night_worker
@@ -297,7 +297,7 @@ jobs:
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
-          NIGHT_WORKER_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN || 'integration-test-token-must-be-at-least-32-chars-long' }}
+          NIGHT_WORKER_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           E2E_BYPASS_AUTH: '1'
           AUTH_SECRET: 'e2e-test-secret-not-secure'
         run: |
