@@ -2,7 +2,6 @@
   "name": "chatbot",
   "version": "3.1.0",
   "private": true,
-
   "scripts": {
     "dev": "next dev --turbo",
     "build": "tsx lib/db/migrate && next build",
@@ -17,9 +16,10 @@
     "db:pull": "drizzle-kit pull",
     "db:check": "drizzle-kit check",
     "db:up": "drizzle-kit up",
-    "test": "export PLAYWRIGHT=True && pnpm exec playwright test"
+    "test": "pnpm exec tsx --test tests/with-timeout.test.ts tests/grounding.test.ts tests/mcp-client.test.ts tests/mcp-client-lifecycle.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.52",
     "@ai-sdk/otel": "^1.0.15",
     "@ai-sdk/provider": "^4.0.2",
     "@ai-sdk/react": "4.0.16",

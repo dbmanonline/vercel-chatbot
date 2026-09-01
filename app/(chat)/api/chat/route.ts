@@ -120,7 +120,18 @@ export async function POST(request: Request) {
 
     const chatModel = allowedModelIds.has(selectedChatModel)
       ? selectedChatModel
-      : DEFAULT_CHAT_MODEL;
+      : allowedModelIds.has(`agent-shop/${selectedChatModel}`)
+        ? `agent-shop/${selectedChatModel}`
+        : DEFAULT_CHAT_MODEL;
+
+    console.log(
+      "[E2E] session:",
+      session ? "exists" : "null",
+      "user:",
+      session?.user?.type ?? "null",
+      "chatModel:",
+      chatModel
+    );
 
     const userType: UserType = session.user.type;
 
@@ -223,7 +234,7 @@ export async function POST(request: Request) {
       longitude,
     };
 
-    if (message?.role === "user") {
+    if (message?.role === "user" && process.env.E2E_BYPASS_AUTH !== "1") {
       await saveMessages({
         messages: [
           {
@@ -266,8 +277,10 @@ export async function POST(request: Request) {
 
     // MCP setup - request-scoped client (NOT a singleton).
     const MCP_ENABLED = process.env.MCP_ENABLED === "true";
-    const MCP_SERVER_URL = process.env.MCP_SERVER_URL || "";
-    const MCP_AUTH_TOKEN = process.env.MCP_AUTH_TOKEN || "";
+    const MCP_SERVER_URL =
+      process.env.MCP_SERVER_URL || process.env.NIGHT_WORKER_URL || "";
+    const MCP_AUTH_TOKEN =
+      process.env.MCP_AUTH_TOKEN || process.env.NIGHT_WORKER_TOKEN || "";
     const MCP_TIMEOUT_MS = Number.parseInt(
       process.env.MCP_TIMEOUT_MS || "30000",
       10
@@ -536,10 +549,21 @@ export async function POST(request: Request) {
           );
 
           // Wait for the full stream to complete and capture final text.
+          console.log(
+            "[E2E] BEFORE result.text, bufferedText length:",
+            bufferedText.length
+          );
           try {
+            console.log("[E2E] result object keys:", Object.keys(result ?? {}));
+            console.log("[E2E] result.text type:", typeof result?.text);
             finalAnswer = await result.text;
+            console.log("[E2E] finalAnswer:", finalAnswer?.slice(0, 50));
           } catch (err) {
             console.warn("[chat] result.text failed:", err);
+            console.warn(
+              "[E2E] result in catch:",
+              JSON.stringify(result ?? {}).slice(0, 200)
+            );
           }
           // If the SDK didn't expose text via result.text, fall back to
           // what we accumulated from text-delta events.

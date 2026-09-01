@@ -11,7 +11,7 @@ config({
 });
 
 /* Use process.env.PORT by default and fallback to port 3000 */
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PLAYWRIGHT_TEST_PORT || process.env.PORT || 3700;
 
 /**
  * Set webServer.url and use.baseURL with the location

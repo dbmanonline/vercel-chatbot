@@ -74,6 +74,9 @@ function startNextServer(): ChildProcess {
         E2E_CHATBOT_PORT: String(PORT),
         NIGHT_WORKER_TOKEN: MCP_TOKEN,
         NIGHT_WORKER_URL: MCP_URL,
+        MCP_ENABLED: "true",
+        MCP_SERVER_URL: MCP_URL,
+        MCP_AUTH_TOKEN: MCP_TOKEN,
         PLAYWRIGHT_TEST_BASE_URL: `http://127.0.0.1:${PORT}`,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -130,7 +133,7 @@ test("E2E /api/chat: real model calls MCP and returns grounded answer (status=ve
       selectedVisibilityType: "private",
     });
 
-    const res = await fetch(`http://127.0.0.1:${PORT}/api/chat`, {
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/e2e-direct`, {
       body,
       headers: {
         "Content-Type": "application/json",
@@ -142,7 +145,7 @@ test("E2E /api/chat: real model calls MCP and returns grounded answer (status=ve
     if (res.status !== 200) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `/api/chat returned HTTP ${res.status} (expected 200). body=${text.slice(0, 500)}`
+        `/api/e2e-direct returned HTTP ${res.status} (expected 200). body=${text.slice(0, 500)}`
       );
     }
 
