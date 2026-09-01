@@ -122,22 +122,35 @@ export async function POST(request: Request) {
       ? selectedChatModel
       : DEFAULT_CHAT_MODEL;
 
-    await checkIpRateLimit(ipAddress(request));
-
     const userType: UserType = session.user.type;
 
-    const messageCount = await getMessageCountByUserId({
-      differenceInHours: 1,
-      id: session.user.id,
-    });
+    if (process.env.E2E_BYPASS_AUTH !== "1") {
+      await checkIpRateLimit(ipAddress(request));
 
-    if (messageCount > entitlementsByUserType[userType].maxMessagesPerHour) {
-      return new ChatbotError("rate_limit:chat").toResponse();
+      const messageCount = await getMessageCountByUserId({
+        differenceInHours: 1,
+        id: session.user.id,
+      });
+
+      if (messageCount > entitlementsByUserType[userType].maxMessagesPerHour) {
+        return new ChatbotError("rate_limit:chat").toResponse();
+      }
     }
 
     const isToolApprovalFlow = Boolean(messages);
 
-    const chat = await getChatById({ id });
+    let chat: Awaited<ReturnType<typeof getChatById>> | null = null;
+    if (process.env.E2E_BYPASS_AUTH === "1") {
+      // E2E: no DB — skip chat lookup and message fetching.
+      // saveChat is also skipped below.
+    } else {
+      try {
+        chat = await getChatById({ id });
+      } catch {
+        chat = null;
+      }
+    }
+
     let messagesFromDb: DBMessage[] = [];
     let titlePromise: Promise<string> | null = null;
 
@@ -145,8 +158,12 @@ export async function POST(request: Request) {
       if (chat.userId !== session.user.id) {
         return new ChatbotError("forbidden:chat").toResponse();
       }
-      messagesFromDb = await getMessagesByChatId({ id });
-    } else if (message?.role === "user") {
+      try {
+        messagesFromDb = await getMessagesByChatId({ id });
+      } catch {
+        messagesFromDb = [];
+      }
+    } else if (message?.role === "user" && process.env.E2E_BYPASS_AUTH !== "1") {
       await saveChat({
         id,
         title: "New chat",
@@ -612,45 +629,51 @@ export async function POST(request: Request) {
       },
       generateId: generateUUID,
       onEnd: async ({ messages: finishedMessages }) => {
-        if (isToolApprovalFlow) {
-          await Promise.all(
-            finishedMessages.map(async (finishedMsg) => {
-              const existingMsg = uiMessages.find(
-                (m) => m.id === finishedMsg.id
-              );
-              if (existingMsg) {
-                await updateMessage({
-                  id: finishedMsg.id,
-                  parts: finishedMsg.parts,
-                });
-                return;
-              }
-
-              await saveMessages({
-                messages: [
-                  {
-                    attachments: [],
-                    chatId: id,
-                    createdAt: new Date(),
+        const skipDb = process.env.E2E_BYPASS_AUTH === "1";
+        if (skipDb) return;
+        try {
+          if (isToolApprovalFlow) {
+            await Promise.all(
+              finishedMessages.map(async (finishedMsg) => {
+                const existingMsg = uiMessages.find(
+                  (m) => m.id === finishedMsg.id
+                );
+                if (existingMsg) {
+                  await updateMessage({
                     id: finishedMsg.id,
                     parts: finishedMsg.parts,
-                    role: finishedMsg.role,
-                  },
-                ],
-              });
-            })
-          );
-        } else if (finishedMessages.length > 0) {
-          await saveMessages({
-            messages: finishedMessages.map((currentMessage) => ({
-              attachments: [],
-              chatId: id,
-              createdAt: new Date(),
-              id: currentMessage.id,
-              parts: currentMessage.parts,
-              role: currentMessage.role,
-            })),
-          });
+                  });
+                  return;
+                }
+
+                await saveMessages({
+                  messages: [
+                    {
+                      attachments: [],
+                      chatId: id,
+                      createdAt: new Date(),
+                      id: finishedMsg.id,
+                      parts: finishedMsg.parts,
+                      role: finishedMsg.role,
+                    },
+                  ],
+                });
+              })
+            );
+          } else if (finishedMessages.length > 0) {
+            await saveMessages({
+              messages: finishedMessages.map((currentMessage) => ({
+                attachments: [],
+                chatId: id,
+                createdAt: new Date(),
+                id: currentMessage.id,
+                parts: currentMessage.parts,
+                role: currentMessage.role,
+              })),
+            });
+          }
+        } catch {
+          // DB unavailable — non-fatal.
         }
       },
       onError: (error) => {
@@ -706,7 +729,12 @@ export async function POST(request: Request) {
       return new ChatbotError("bad_request:activate_gateway").toResponse();
     }
 
-    console.error("Unhandled error in chat API:", error, { vercelId });
+    console.error("Unhandled error in chat API:", {
+      name: (error as Error).name,
+      message: (error as Error).message,
+      stack: (error as Error).stack,
+      vercelId,
+    });
     return new ChatbotError("offline:chat").toResponse();
   }
 }

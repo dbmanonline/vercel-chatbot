@@ -5,6 +5,12 @@ import { guestRegex, isDevelopmentEnvironment } from "./lib/constants";
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // E2E test bypass: skip auth for local/CI testing when explicitly enabled.
+  // MUST be unset in production.
+  if (process.env.E2E_BYPASS_AUTH === "1") {
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/ping")) {
     return new Response("pong", { status: 200 });
   }

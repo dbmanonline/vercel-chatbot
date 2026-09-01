@@ -129,7 +129,7 @@ export const titleModel = createMockTitleModel();
  */
 export function createE2ELanguageModel(modelId: string): LanguageModel {
   const baseUrl = process.env.E2E_PROXY_URL ?? "http://localhost:20128";
-  const apiKey = process.env.E2E_PROXY_KEY ?? "";
+  void process.env.E2E_PROXY_KEY;
 
   const finishChunk = {
     finishReason: "stop" as const,
@@ -147,7 +147,6 @@ export function createE2ELanguageModel(modelId: string): LanguageModel {
     const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
       body: JSON.stringify({ messages, model: modelId, stream: true, tools }),
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       method: "POST",
@@ -212,7 +211,6 @@ export function createE2ELanguageModel(modelId: string): LanguageModel {
     const resp = await fetch(`${baseUrl}/v1/chat/completions`, {
       body: JSON.stringify({ messages, model: modelId, stream: false, tools }),
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       method: "POST",
