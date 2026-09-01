@@ -13,7 +13,7 @@ import {
   McpAbortError,
   McpTimeoutError,
   withTimeout,
-} from "../lib/mcp/_withTimeout";
+} from "../lib/mcp/_with-timeout";
 
 // Spy helper: count add/remove listeners on an AbortSignal.
 type Spy = { added: number; removed: number };
@@ -23,13 +23,13 @@ function spyAbort(signal: AbortSignal): Spy {
   const origRemove = signal.removeEventListener.bind(signal);
   (signal as any).addEventListener = (type: any, l: any, o?: any) => {
     if (type === "abort") {
-      spy.added++;
+      spy.added += 1;
     }
     return origAdd(type, l, o);
   };
   (signal as any).removeEventListener = (type: any, l: any, o?: any) => {
     if (type === "abort") {
-      spy.removed++;
+      spy.removed += 1;
     }
     return origRemove(type, l, o);
   };

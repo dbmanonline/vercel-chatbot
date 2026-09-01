@@ -111,13 +111,13 @@ test("MCP client per-call AbortSignal listener is removed after success (no leak
   const origRemove = ac.signal.removeEventListener.bind(ac.signal);
   (ac.signal as any).addEventListener = (type: any, l: any, o?: any) => {
     if (type === "abort") {
-      added++;
+      added += 1;
     }
     return origAdd(type, l, o);
   };
   (ac.signal as any).removeEventListener = (type: any, l: any, o?: any) => {
     if (type === "abort") {
-      removed++;
+      removed += 1;
     }
     return origRemove(type, l, o);
   };
@@ -144,13 +144,13 @@ test("MCP client per-call AbortSignal listener is removed after timeout (no leak
   const origRemove = ac.signal.removeEventListener.bind(ac.signal);
   (ac.signal as any).addEventListener = (type: any, l: any, o?: any) => {
     if (type === "abort") {
-      added++;
+      added += 1;
     }
     return origAdd(type, l, o);
   };
   (ac.signal as any).removeEventListener = (type: any, l: any, o?: any) => {
     if (type === "abort") {
-      removed++;
+      removed += 1;
     }
     return origRemove(type, l, o);
   };

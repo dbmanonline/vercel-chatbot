@@ -37,6 +37,7 @@ const PROJECT_ROOT = process.cwd();
 
 async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now();
+  // biome-ignore lint/performance/noAwaitInLoops: server warm-up polling.
   while (Date.now() - start < timeoutMs) {
     try {
       const res = await fetch(url);
@@ -51,7 +52,7 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`Server at ${url} did not become ready in ${timeoutMs}ms`);
 }
 
-async function startNextServer(): Promise<ChildProcess> {
+function startNextServer(): ChildProcess {
   const proc = spawn(
     process.platform === "win32" ? "pnpm.cmd" : "pnpm",
     ["next", "dev", "--port", String(PORT)],
@@ -96,7 +97,7 @@ test("E2E /api/chat: real model calls MCP and returns grounded answer (status=ve
     return;
   }
 
-  const proc = await startNextServer();
+  const proc = startNextServer();
   try {
     await waitForServer(`http://127.0.0.1:${PORT}/`, 60_000);
 
@@ -136,7 +137,7 @@ test("E2E /api/chat: real model calls MCP and returns grounded answer (status=ve
       );
     }
 
-    const reader = res.body!.getReader();
+    const reader = (res.body as ReadableStream).getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let sawToolCall = false;
@@ -146,6 +147,8 @@ test("E2E /api/chat: real model calls MCP and returns grounded answer (status=ve
     let groundingStatus: string | null = null;
 
     while (true) {
+      // biome-ignore lint/performance/noAwaitInLoops: SSE stream must be
+      // read chunk-by-chunk.
       const { value, done } = await reader.read();
       if (done) {
         break;

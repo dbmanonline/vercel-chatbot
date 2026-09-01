@@ -471,7 +471,6 @@ export async function POST(request: Request) {
         // (no actual answer text).
         let finalAnswer = "";
         if (isBusiness && mcpHandle) {
-
           let currentTextId: string | null = null;
           let bufferedText = "";
 
@@ -491,7 +490,6 @@ export async function POST(request: Request) {
                 chunk?.type === "reasoning-start" ||
                 chunk?.type === "reasoning-end"
               ) {
-
                 if (
                   chunk.type === "text-delta" &&
                   typeof chunk.delta === "string"

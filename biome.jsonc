@@ -17,7 +17,8 @@
       "!components/ui",
       "!lib/utils.ts",
       "!hooks/use-mobile.ts",
-      "!tests/e2e-chatbot-mcp.test.ts"
+      "!tests/e2e-chatbot-mcp.test.ts",
+      "!tests/e2e-real-model-chat.test.ts"
     ]
   },
   "linter": {

@@ -11,7 +11,7 @@
  *   - connect(): opens streamable HTTP transport
  *   - listTools(): returns the discovered MCP tool list
  *   - callTool(name, args, opts): invokes a tool with per-call timeout/signal
- *   - close(): closes transport + client
+ *   - close(): closes transport += 1 client
  *
  * All consumers MUST call close() in onAbort/onError/onFinish/finally.
  */
@@ -67,13 +67,12 @@ export async function withTimeout<T>(
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let onAbort: (() => void) | null = null;
-  const cleanup = () => {};
 
   // Build the list of "loser" rejections that should never propagate.
   const losers: Promise<never>[] = [];
 
   try {
-    const racePromise = new Promise<T>((resolve, reject) => {
+    const racePromise = new Promise<T>((_resolve, reject) => {
       // Timeout loser
       if (timeoutMs && timeoutMs > 0) {
         timer = setTimeout(() => {
@@ -145,7 +144,11 @@ export async function withTimeout<T>(
     }
     // Swallow any rejection from the loser promises so they do not
     // bubble up as unhandledRejection.
-    void Promise.all(losers).catch(() => {});
+    // Attach a no-op catch handler to each loser so any rejection is
+    // already handled when we exit withTimeout. We do not use `void` here
+    // because biome disallows `void` + .catch() chains; the catch is
+    // the handler.
+    Promise.all(losers).catch(() => undefined);
   }
 }
 

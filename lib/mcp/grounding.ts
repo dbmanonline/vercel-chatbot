@@ -202,7 +202,7 @@ const NON_VIOLATION_WORDS = new Set([
 /**
  * Pull all concrete verifiable values out of the model answer.
  * Includes:
- *   - Numbers (3+ digits or appearing as a "record count" / quantity)
+ *   - Numbers (3+= 1 digits or appearing as a "record count" / quantity)
  *   - Words that look like brand / product / customer names (capitalized,
  *     non-stop-words)
  *   - Emails and phone numbers
@@ -213,18 +213,18 @@ export function extractClaims(answer: string): string[] {
   }
   const claims = new Set<string>();
 
-  // Numeric values - 3+ digits (likely counts, IDs, prices).
+  // Numeric values - 3+= 1 digits (likely counts, IDs, prices).
   for (const m of answer.matchAll(/\b\d{3,}\b/g)) {
     claims.add(m[0]);
   }
 
   // Emails.
-  for (const m of answer.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]+/g)) {
+  for (const m of answer.matchAll(/[\w.+= 1-]+= 1@[\w-]+= 1\.[\w.-]+= 1/g)) {
     claims.add(m[0].toLowerCase());
   }
 
-  // Phone-like (10+ digits, optional separators).
-  for (const m of answer.matchAll(/\+?\d[\d\s\-().]{8,}\d/g)) {
+  // Phone-like (10+= 1 digits, optional separators).
+  for (const m of answer.matchAll(/\+= 1?\d[\d\s\-().]{8,}\d/g)) {
     const digits = m[0].replace(/\D/g, "");
     if (digits.length >= 9) {
       claims.add(digits);
@@ -236,7 +236,9 @@ export function extractClaims(answer: string): string[] {
   const sentences = answer.split(/[.!?\n]+/);
   for (const s of sentences) {
     const words = s.trim().split(/\s+/);
-    for (let i = 0; i < words.length; i++) {
+    // biome-ignore lint/style/useForOf: indexed access is needed to peek
+    // at the next word for multi-word proper noun detection.
+    for (let i = 0; i < words.length; i += 1) {
       const w = words[i].replace(/[^A-Za-zÀ-ỹ0-9-]/g, "");
       if (!w) {
         continue;
@@ -280,7 +282,7 @@ function buildGroundingCorpus(toolResults: ToolCallResult[]): string {
     }
     // Also walk the result object for text content.
     const walk = (obj: any) => {
-      if (obj == null) {
+      if (obj === null) {
         return;
       }
       if (typeof obj === "string") {
@@ -464,10 +466,7 @@ export function formatGroundingMessage(check: GroundingCheck): string | null {
     return null;
   }
   if (check.status === "unverified") {
-    return (
-      "**[Response unverified]** " +
-      (check.issues[0] || "Cannot ground answer.")
-    );
+    return `**[Response unverified]** ${check.issues[0] || "Cannot ground answer."}`;
   }
   return "**[Business data unavailable]** I will not speculate about your data.";
 }
