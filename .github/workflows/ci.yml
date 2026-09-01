@@ -239,15 +239,11 @@ jobs:
       # Night Worker may already be running from e2e-night-worker job.
       # Only clone/start if NIGHT_WORKER_REPO_TOKEN is available.
       - name: Clone Night Worker for real-model E2E
+        id: nw_cloned
         env:
           NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
         run: |
-          # Exit if no token available (NW might already be running from e2e-night-worker)
-          if [ -z "$NW_REPO_TOKEN" ]; then
-            echo "No NIGHT_WORKER_REPO_TOKEN — assuming Night Worker already running from e2e-night-worker"
-            exit 0
-          fi
           REF=""
           if [ -n "${{ vars.NIGHT_WORKER_COMMIT }}" ]; then
             REF="${{ vars.NIGHT_WORKER_COMMIT }}"
@@ -265,10 +261,12 @@ jobs:
           git checkout "$REF"
 
       - name: Install Night Worker deps
+        if: steps.nw_cloned.outcome == 'success'
         working-directory: /tmp/night_worker
         run: npm install --no-audit --no-fund || true
 
       - name: Start Night Worker MCP server (if cloned above)
+        if: steps.nw_cloned.outcome == 'success'
         working-directory: /tmp/night_worker
         env:
           MCP_ENABLED: 'true'
