@@ -1,7 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { customProvider, gateway } from "ai";
 import { isTestEnvironment } from "../constants";
-import { titleModel } from "./models";
+import { chatModels, titleModel } from "./models";
 
 // E2E mode: create provider that routes through Hermes proxy to AgentShop247
 function createE2EProvider() {
@@ -20,13 +20,25 @@ function createE2EProvider() {
   });
 }
 
-// Production mode: use Vercel AI Gateway
+// Production mode: all models route through Vercel AI Gateway.
+// gateway.languageModel(id) forwards to the AI Gateway configured in
+// Vercel project settings, which handles model selection, fallbacks,
+// and API key management.
 function createProductionProvider() {
-  return customProvider({
-    languageModels: {
-      [titleModel.id]: gateway.languageModel(titleModel.id),
-    },
-  });
+  const languageModels: Record<
+    string,
+    ReturnType<typeof gateway.languageModel>
+  > = {};
+
+  // Register all chat models via AI Gateway
+  for (const model of chatModels) {
+    languageModels[model.id] = gateway.languageModel(model.id);
+  }
+
+  // Also register the agent-shop variants that route via gateway
+  languageModels["title-model"] = gateway.languageModel(titleModel.id);
+
+  return customProvider({ languageModels });
 }
 
 export const myProvider = isTestEnvironment
@@ -38,5 +50,5 @@ export function getLanguageModel(modelId: string) {
 }
 
 export function getTitleModel() {
-  return myProvider.languageModel("title-model");
+  return myProvider.languageModel(titleModel.id);
 }

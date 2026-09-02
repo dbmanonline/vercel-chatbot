@@ -59,6 +59,10 @@ export const maxDuration = 60;
 
 const HEALTH_CHECK_DELAY_MS = 9000;
 
+/** E2E bypass is ONLY allowed in non-production environments. */
+const E2E_BYPASS =
+  process.env.E2E_BYPASS_AUTH === "1" && !isProductionEnvironment;
+
 function isModelStreamActivity(chunk: { type: string }) {
   return !["start", "start-step", "finish-step", "finish", "raw"].includes(
     chunk.type
@@ -98,21 +102,19 @@ export async function POST(request: Request) {
       return new ChatbotError("forbidden:api").toResponse();
     }
 
-    // E2E bypass: only when explicitly enabled via env var, return a
-    // fake session for local/CI testing. Production MUST have
-    // E2E_BYPASS_AUTH unset so this branch is dead.
-    const session =
-      process.env.E2E_BYPASS_AUTH === "1"
-        ? {
-            expires: new Date(Date.now() + 86_400_000).toISOString(),
-            user: {
-              email: "e2e@example.com",
-              id: "e2e-user",
-              name: "E2E Test User",
-              type: "regular" as const,
-            },
-          }
-        : authSession;
+    // E2E bypass: only when explicitly enabled AND not in production.
+    // Production MUST have E2E_BYPASS_AUTH unset so this branch is dead.
+    const session = E2E_BYPASS
+      ? {
+          expires: new Date(Date.now() + 86_400_000).toISOString(),
+          user: {
+            email: "e2e@example.com",
+            id: "e2e-user",
+            name: "E2E Test User",
+            type: "regular" as const,
+          },
+        }
+      : authSession;
 
     if (!session?.user) {
       return new ChatbotError("unauthorized:chat").toResponse();
@@ -124,18 +126,20 @@ export async function POST(request: Request) {
         ? `agent-shop/${selectedChatModel}`
         : DEFAULT_CHAT_MODEL;
 
-    console.log(
-      "[E2E] session:",
-      session ? "exists" : "null",
-      "user:",
-      session?.user?.type ?? "null",
-      "chatModel:",
-      chatModel
-    );
+    if (!isProductionEnvironment) {
+      console.log(
+        "[chat] session:",
+        session ? "exists" : "null",
+        "user:",
+        session?.user?.type ?? "null",
+        "chatModel:",
+        chatModel
+      );
+    }
 
     const userType: UserType = session.user.type;
 
-    if (process.env.E2E_BYPASS_AUTH !== "1") {
+    if (!E2E_BYPASS) {
       await checkIpRateLimit(ipAddress(request));
 
       const messageCount = await getMessageCountByUserId({
@@ -151,10 +155,7 @@ export async function POST(request: Request) {
     const isToolApprovalFlow = Boolean(messages);
 
     let chat: Awaited<ReturnType<typeof getChatById>> | null = null;
-    if (process.env.E2E_BYPASS_AUTH === "1") {
-      // E2E: no DB — skip chat lookup and message fetching.
-      // saveChat is also skipped below.
-    } else {
+    if (!E2E_BYPASS) {
       try {
         chat = await getChatById({ id });
       } catch {
@@ -174,10 +175,7 @@ export async function POST(request: Request) {
       } catch {
         messagesFromDb = [];
       }
-    } else if (
-      message?.role === "user" &&
-      process.env.E2E_BYPASS_AUTH !== "1"
-    ) {
+    } else if (message?.role === "user" && !E2E_BYPASS) {
       await saveChat({
         id,
         title: "New chat",
@@ -234,7 +232,7 @@ export async function POST(request: Request) {
       longitude,
     };
 
-    if (message?.role === "user" && process.env.E2E_BYPASS_AUTH !== "1") {
+    if (message?.role === "user" && !E2E_BYPASS) {
       await saveMessages({
         messages: [
           {
@@ -549,21 +547,10 @@ export async function POST(request: Request) {
           );
 
           // Wait for the full stream to complete and capture final text.
-          console.log(
-            "[E2E] BEFORE result.text, bufferedText length:",
-            bufferedText.length
-          );
           try {
-            console.log("[E2E] result object keys:", Object.keys(result ?? {}));
-            console.log("[E2E] result.text type:", typeof result?.text);
             finalAnswer = await result.text;
-            console.log("[E2E] finalAnswer:", finalAnswer?.slice(0, 50));
           } catch (err) {
             console.warn("[chat] result.text failed:", err);
-            console.warn(
-              "[E2E] result in catch:",
-              JSON.stringify(result ?? {}).slice(0, 200)
-            );
           }
           // If the SDK didn't expose text via result.text, fall back to
           // what we accumulated from text-delta events.
@@ -656,8 +643,7 @@ export async function POST(request: Request) {
       },
       generateId: generateUUID,
       onEnd: async ({ messages: finishedMessages }) => {
-        const skipDb = process.env.E2E_BYPASS_AUTH === "1";
-        if (skipDb) {
+        if (E2E_BYPASS) {
           return;
         }
         try {

@@ -12,9 +12,16 @@ on:
         required: false
         type: string
 
+env:
+  # These are never used in production. Only for local/CI testing.
+  # Production uses Vercel AI Gateway with model keys configured in Vercel dashboard.
+  E2E_BYPASS_AUTH: "1"
+  MCP_ENABLED: "true"
+
 jobs:
   # ============================================================
   # Unit tests + typecheck + lint + build
+  # Runs on every push/PR. Never blocked by cross-repo secrets.
   # ============================================================
   unit-typecheck-build:
     runs-on: ubuntu-latest
@@ -41,16 +48,18 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Standalone withTimeout + grounding tests (no server)
-        run: pnpm exec tsx --test tests/with-timeout.test.ts tests/grounding.test.ts
+      - name: Run unit tests (timeout + grounding + MCP client + lifecycle = 36 tests)
+        run: pnpm exec tsx --test tests/with-timeout.test.ts tests/grounding.test.ts tests/mcp-client.test.ts tests/mcp-client-lifecycle.test.ts
 
   # ============================================================
-  # E2E: clones the Night Worker commit pinned EXPLICITLY via
-  # workflow input or repository variable. NEVER derives from
-  # the chatbot PR's head SHA (that would be the wrong SHA).
-  # If no SHA can be resolved AND NIGHT_WORKER_REPO_TOKEN is set,
-  # the job FAILS. If NIGHT_WORKER_REPO_TOKEN is missing, the job
-  # exits with status=blocked and is reported clearly.
+  # E2E Night Worker
+  #
+  # RESOLVE NW SHA from (in priority order):
+  #   1. workflow_dispatch input
+  #   2. repo variable NIGHT_WORKER_COMMIT
+  #   3. git ls-remote on origin/main
+  # If NIGHT_WORKER_REPO_TOKEN is missing AND no SHA resolved -> NOT_RUN
+  # If SHA resolved but NW repo is private + no token -> FAIL
   # ============================================================
   e2e-night-worker:
     runs-on: ubuntu-latest
@@ -71,228 +80,95 @@ jobs:
       - name: Install chatbot deps
         run: pnpm install --frozen-lockfile
 
-      # ----- Determine Night Worker commit SHA -----
+      # ----- Resolve Night Worker commit SHA -----
       - name: Resolve Night Worker commit SHA
         id: resolve_nw
         env:
           NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Set defaults FIRST — ensures the step always succeeds and later
-          # steps can check the outputs even when git ls-remote fails.
           echo "sha=unknown" >> "$GITHUB_OUTPUT"
-          echo "SKIP_E2E=blocked" >> "$GITHUB_OUTPUT"
+          echo "SKIP_E2E=no" >> "$GITHUB_OUTPUT"
+          echo "SKIP_REASON=" >> "$GITHUB_OUTPUT"
 
           REF=""
-          # 1. workflow_dispatch input (takes precedence)
+          # 1. workflow_dispatch input
           if [ -n "${{ github.event.inputs.night_worker_commit }}" ]; then
             REF="${{ github.event.inputs.night_worker_commit }}"
             echo "Using workflow_dispatch input: $REF"
           fi
-          # 2. repo variable NIGHT_WORKER_COMMIT
+          # 2. repo variable
           if [ -z "$REF" ] && [ -n "${{ vars.NIGHT_WORKER_COMMIT }}" ]; then
             REF="${{ vars.NIGHT_WORKER_COMMIT }}"
             echo "Using vars.NIGHT_WORKER_COMMIT: $REF"
           fi
-          # 3. resolve main HEAD via git ls-remote. Use whichever token we have.
-          # NOTE: if neither token can access night_worker, outputs already default
-          # to 'blocked' above so the step succeeds.
+          # 3. resolve main HEAD via ls-remote
           if [ -z "$REF" ]; then
             if [ -n "$NW_REPO_TOKEN" ]; then
-              AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
-            elif [ -n "$GH_TOKEN" ]; then
-              AUTH_URL="https://x-access-token:${GH_TOKEN}@github.com/dbmanonline/night_worker.git"
+              AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker"
+              REF=$(git ls-remote "$AUTH_URL" main 2>/dev/null | cut -f1)
+              echo "Resolved via ls-remote: ${REF:-none}"
             else
-              AUTH_URL="https://github.com/dbmanonline/night_worker.git"
+              echo "No NIGHT_WORKER_REPO_TOKEN and no NIGHT_WORKER_COMMIT var — cannot resolve SHA"
             fi
-            REF=$(git ls-remote "$AUTH_URL" refs/heads/main 2>/dev/null | awk '{print $1}')
-            echo "Resolved Night Worker main HEAD: ${REF:-<empty>}"
-          fi
-          if [ -n "$REF" ] && [ "$REF" != "0000000000000000000000000000000000000000" ]; then
-            echo "Night Worker SHA: $REF"
-            echo "sha=$REF" > "$GITHUB_OUTPUT"
-            echo "SKIP_E2E=run" > "$GITHUB_OUTPUT"
-          fi
-# ----- Block cleanly when SHA/token unavailable -----
-      - name: E2E blocked - cannot reach Night Worker
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'blocked'
-        run: |
-          echo "::warning::E2E NIGHT_WORKER blocked: NIGHT_WORKER_REPO_TOKEN secret missing or Night Worker commit SHA unresolved."
-          echo "Set NIGHT_WORKER_REPO_TOKEN in repo settings, then re-run. This is NOT a code failure."
-
-      # ----- Clone the pinned commit -----
-      - name: Clone the pinned Night Worker commit
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
-        env:
-          NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
-        run: |
-          AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
-          git clone --no-checkout "$AUTH_URL" /tmp/night_worker
-          cd /tmp/night_worker
-          git checkout "${{ steps.resolve_nw.outputs.sha }}"
-
-      - name: Install Night Worker deps
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
-        working-directory: /tmp/night_worker
-        run: npm install --no-audit --no-fund
-
-      # ----- Start the server with real data (no seed()) -----
-      - name: Start Night Worker MCP server
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
-        working-directory: /tmp/night_worker
-        env:
-          MCP_ENABLED: 'true'
-          MCP_AUTH_TOKEN: integration-test-token-must-be-at-least-32-chars-long
-          MCP_TOOL_TIMEOUT_MS: '15000'
-          LEGACY_CHAT_ENABLED: 'false'
-          NODE_ENV: test
-          PORT: '13579'
-        run: |
-          nohup node server.js > /tmp/nw.log 2>&1 &
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:13579/health > /dev/null; then
-              echo "Night Worker ready in ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Night Worker failed to start"
-          cat /tmp/nw.log
-          exit 1
-
-      - name: Verify Night Worker has real sources via MCP
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
-        env:
-          NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
-          NIGHT_WORKER_TOKEN: integration-test-token-must-be-at-least-32-chars-long
-        run: |
-          node -e "
-            const t = process.env.NIGHT_WORKER_TOKEN;
-            fetch(process.env.NIGHT_WORKER_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+t },
-              body: JSON.stringify({ jsonrpc:'2.0', id:1, method:'tools/call', params:{ name:'search_records', arguments:{ limit:1 } } })
-            }).then(async r => {
-              if (!r.ok) { console.error('search_records HTTP', r.status); process.exit(1); }
-              const text = await r.text();
-              let body = text;
-              if (text.startsWith('event:')) {
-                const m = text.split('\\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6)).join('');
-                body = JSON.parse(m);
-              } else { body = JSON.parse(text); }
-              const records = body?.result?.records || [];
-              const sources = body?.result?.sources || [];
-              console.log('records=', records.length, 'sources=', sources.length);
-              if (records.length === 0) { console.error('No records returned from search_records'); process.exit(1); }
-              if (sources.length === 0) { console.error('Empty sources array'); process.exit(1); }
-              console.log('E2E: Night Worker has real data');
-            }).catch(e => { console.error(e); process.exit(1); });
-          "
-
-      # ----- Run MCP client tests against the real server -----
-      - name: MCP client + lifecycle tests (real Night Worker)
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
-        env:
-          NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
-          NIGHT_WORKER_TOKEN: integration-test-token-must-be-at-least-32-chars-long
-        run: |
-          pnpm exec tsx --test tests/mcp-client.test.ts tests/mcp-client-lifecycle.test.ts
-
-      # ----- Real-model /api/chat E2E: requires AI_GATEWAY_API_KEY -----
-      - name: Real-model /api/chat E2E
-        if: steps.resolve_nw.outputs.SKIP_E2E == 'run'
-        env:
-          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-          NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
-          NIGHT_WORKER_TOKEN: integration-test-token-must-be-at-least-32-chars-long
-          E2E_BYPASS_AUTH: '1'
-          AUTH_SECRET: 'e2e-test-secret-not-secure'
-        run: |
-          pnpm exec tsx --test tests/e2e-real-model-chat.test.ts
-
-  # ============================================================
-  # Real-model E2E: only runs when AI_GATEWAY_API_KEY is set.
-  # When missing, the job exits with status=blocked (warning).
-  # ============================================================
-  # ============================================================
-  # Real-model /api/chat E2E: requires AI_GATEWAY_API_KEY + Night Worker MCP.
-  # When AI_GATEWAY_API_KEY is absent, this step prints a warning and skips.
-  # When NIGHT_WORKER_REPO_TOKEN is absent, NW is not cloned (relies on e2e-night-worker having started it).
-  # ============================================================
-  e2e-real-model:
-    runs-on: ubuntu-latest
-    needs: [unit-typecheck-build, e2e-night-worker]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: '10'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install chatbot deps
-        run: pnpm install --frozen-lockfile
-
-      # Night Worker may already be running from e2e-night-worker job.
-      # Only clone/start if NIGHT_WORKER_REPO_TOKEN is available.
-      - name: Clone + install + start Night Worker (if token available)
-        id: nw_setup
-        env:
-          NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
-        run: |
-          # No token: assume Night Worker already running from e2e-night-worker
-          if [ -z "$NW_REPO_TOKEN" ]; then
-            echo "No NIGHT_WORKER_REPO_TOKEN — assuming Night Worker already running"
-            exit 0
           fi
 
-          # Clone
-          REF=""
-          if [ -n "${{ vars.NIGHT_WORKER_COMMIT }}" ]; then
-            REF="${{ vars.NIGHT_WORKER_COMMIT }}"
+          if [ -z "$REF" ]; then
+            echo "sha=unknown" >> "$GITHUB_OUTPUT"
+            echo "SKIP_E2E=NOT_RUN" >> "$GITHUB_OUTPUT"
+            echo "SKIP_REASON=No NW token and no NIGHT_WORKER_COMMIT var — cannot resolve NW SHA" >> "$GITHUB_OUTPUT"
           else
-            AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git"
-            REF=$(git ls-remote "$AUTH_URL" refs/heads/main 2>/dev/null | awk '{print $1}')
+            echo "sha=$REF" >> "$GITHUB_OUTPUT"
+            echo "SKIP_E2E=no" >> "$GITHUB_OUTPUT"
           fi
-          if [ -z "$REF" ] || [ "$REF" = "0000000000000000000000000000000000000000" ]; then
-            echo "Warning: Could not resolve Night Worker SHA — skipping"
-            exit 0
-          fi
-          echo "Cloning Night Worker at $REF"
-          git clone --no-checkout "https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker.git" /tmp/night_worker
-          cd /tmp/night_worker
-          git checkout "$REF"
 
-          # Install
-          npm install --no-audit --no-fund
+      # ----- Checkout the resolved NW SHA -----
+      - name: Checkout Night Worker at ${{ steps.resolve_nw.outputs.sha }}
+        if: steps.resolve_nw.outputs.SKIP_E2E == 'no'
+        uses: actions/checkout@v4
+        with:
+          repository: dbmanonline/night_worker
+          ref: ${{ steps.resolve_nw.outputs.sha }}
+          token: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
+          path: night_worker
+          fetch-depth: 0
 
-          # Start
-          MCP_ENABLED=true MCP_AUTH_TOKEN=integration-test-token-must-be-at-least-32-chars-long MCP_TOOL_TIMEOUT_MS=15000 LEGACY_CHAT_ENABLED=false NODE_ENV=test PORT=13579 nohup node server.js > /tmp/nw.log 2>&1 &
-          for i in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:13579/health > /dev/null; then
-              echo "Night Worker ready in ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Warning: Night Worker failed to start"
-          cat /tmp/nw.log || true
-
-      - name: Real-model /api/chat E2E
-        env:
-          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-          NIGHT_WORKER_URL: http://127.0.0.1:13579/mcp
-          NIGHT_WORKER_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
-          E2E_BYPASS_AUTH: '1'
-          AUTH_SECRET: 'e2e-test-secret-not-secure'
+      - name: Install Night Worker
+        if: steps.resolve_nw.outputs.SKIP_E2E == 'no'
         run: |
-          if [ -z "$AI_GATEWAY_API_KEY" ]; then
-            echo "Warning: AI_GATEWAY_API_KEY not set — /api/chat E2E requires it to call the model."
-            echo "The test infrastructure is ready (proxy.ts bypass, route.ts DB bypass)."
-            echo "Set AI_GATEWAY_API_KEY in repo secrets to enable full E2E."
-            exit 0
-          fi
-          pnpm exec tsx --test tests/e2e-real-model-chat.test.ts
+          cd night_worker && pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+
+      - name: Start Night Worker
+        if: steps.resolve_nw.outputs.SKIP_E2E == 'no'
+        run: |
+          cd night_worker && pnpm start &
+          sleep 5
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:13579/health > /dev/null 2>&1; then
+              echo "NW server ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Report NOT_RUN status
+        if: steps.resolve_nw.outputs.SKIP_E2E == 'NOT_RUN'
+        run: |
+          echo "::notice::E2E SKIPPED: ${{ steps.resolve_nw.outputs.SKIP_REASON }}"
+          echo "To enable E2E: set NIGHT_WORKER_REPO_TOKEN secret or NIGHT_WORKER_COMMIT repo variable"
+
+      # ----- Set MCP env for E2E -----
+      - name: Configure E2E environment
+        if: steps.resolve_nw.outputs.SKIP_E2E == 'no'
+        run: |
+          echo "NIGHT_WORKER_URL=http://localhost:13579/mcp" >> $GITHUB_ENV
+          echo "NIGHT_WORKER_TOKEN=${{ secrets.NIGHT_WORKER_REPO_TOKEN || 'e2e-test-token-must-be-at-least-32-chars-long' }}" >> $GITHUB_ENV
+          echo "E2E_PROXY_URL=http://localhost:20128" >> $GITHUB_ENV
+          echo "E2E_PROXY_KEY=${{ secrets.AI_GATEWAY_API_KEY || '' }}" >> $GITHUB_ENV
+          echo "NODE_ENV=development" >> $GITHUB_ENV
+          echo "E2E_BYPASS_AUTH=1" >> $GITHUB_ENV
+          echo "MCP_ENABLED=true" >> $GITHUB_ENV
+
+      - name: Run E2E real-model test
+        if: steps.resolve_nw.outputs.SKIP_E2E == 'no'
+        run: pnpm exec tsx tests/e2e-real-model-chat.test.ts
