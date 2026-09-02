@@ -113,7 +113,9 @@ test("verifyGrounding: fabricated number REJECTED even when brand is real", () =
   );
 });
 
-test("verifyGrounding: empty answer with real sources => verified (no claims to check)", () => {
+test("verifyGrounding: empty answer => unverified even with sources", () => {
+  // Empty final answer cannot be verified per requirement.
+  // Sources existing is irrelevant when there's nothing to ground.
   const r = verifyGrounding("", [
     {
       args: {},
@@ -122,7 +124,8 @@ test("verifyGrounding: empty answer with real sources => verified (no claims to 
       toolName: "search_records",
     },
   ]);
-  assert.equal(r.status, "verified");
+  assert.equal(r.status, "unverified");
+  assert.equal(r.verified, false);
 });
 
 test("verifyGrounding: answer containing only stop-words => verified", () => {
@@ -168,19 +171,68 @@ test("extractClaims: capitalized brand names", () => {
 
 test("extractClaims: phone digit groups", () => {
   const claims = extractAnswersSafe("Call +1 (555) 123-4567 today!");
-  // We extract 3-digit and 4-digit digit groups from phone numbers.
+  // Phone number regex extracts full number as single claim (10+ digits normalized).
   assert.ok(
-    claims.some((c) => c.includes("555")),
-    JSON.stringify(claims)
+    claims.some((c) => c === "15551234567"),
+    `Expected "15551234567", got: ${JSON.stringify(claims)}`
+  );
+});
+
+test("extractClaims: email addresses", () => {
+  const claims = extractAnswersSafe(
+    "Contact contact@viettelpost.com.vn or sales@abc-corp.com"
   );
   assert.ok(
-    claims.some((c) => c.includes("123")),
-    JSON.stringify(claims)
+    claims.some((c) => c === "contact@viettelpost.com.vn"),
+    `Expected "contact@viettelpost.com.vn", got: ${JSON.stringify(claims)}`
   );
   assert.ok(
-    claims.some((c) => c.includes("4567")),
-    JSON.stringify(claims)
+    claims.some((c) => c === "sales@abc-corp.com"),
+    `Expected "sales@abc-corp.com", got: ${JSON.stringify(claims)}`
   );
+});
+
+test("extractClaims: phone with various formats", () => {
+  // Standard Vietnamese mobile: 09x xxx xxxx
+  const claims1 = extractAnswersSafe("Gọi 0912 345 678 nhé");
+  assert.ok(
+    claims1.some((c) => c === "0912345678"),
+    `Expected "0912345678", got: ${JSON.stringify(claims1)}`
+  );
+  // Landline with area code: (028) 1234 5678
+  const claims2 = extractAnswersSafe("Hotline: (028) 1234 5678");
+  assert.ok(
+    claims2.some((c) => c === "02812345678"),
+    `Expected "02812345678", got: ${JSON.stringify(claims2)}`
+  );
+});
+
+test("extractClaims: email — no false positives on similar strings", () => {
+  // Ensure things that look like emails but aren't don't get matched
+  const claims = extractAnswersSafe("user_name@domain is not an email");
+  assert.ok(
+    !claims.some((c) => c.includes("@")),
+    `Should not match "user_name@domain" as email: ${JSON.stringify(claims)}`
+  );
+});
+
+test("verifyGrounding: empty answer returns unverified", () => {
+  const check = verifyGrounding("", []);
+  assert.equal(check.status, "unverified");
+  assert.equal(check.verified, false);
+  assert.ok(check.issues.some((i) => i.includes("empty")), JSON.stringify(check.issues));
+});
+
+test("verifyGrounding: whitespace-only answer returns unverified", () => {
+  const check = verifyGrounding("   \n\t  ", []);
+  assert.equal(check.status, "unverified");
+  assert.equal(check.verified, false);
+});
+
+test("verifyGrounding: null answer returns unverified", () => {
+  const check = verifyGrounding(null as any, []);
+  assert.equal(check.status, "unverified");
+  assert.equal(check.verified, false);
 });
 
 // helper to keep test imports tidy

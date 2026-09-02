@@ -218,13 +218,13 @@ export function extractClaims(answer: string): string[] {
     claims.add(m[0]);
   }
 
-  // Emails.
-  for (const m of answer.matchAll(/[\w.+= 1-]+= 1@[\w-]+= 1\.[\w.-]+= 1/g)) {
+  // Emails — matches user@domain.tld
+  for (const m of answer.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]+/gi)) {
     claims.add(m[0].toLowerCase());
   }
 
-  // Phone-like (10+= 1 digits, optional separators).
-  for (const m of answer.matchAll(/\+= 1?\d[\d\s\-().]{8,}\d/g)) {
+  // Phone numbers — matches +digit sequences 10+ digits long
+  for (const m of answer.matchAll(/\+?\d[\d\s\-().]{8,}\d/gi)) {
     const digits = m[0].replace(/\D/g, "");
     if (digits.length >= 9) {
       claims.add(digits);
@@ -338,7 +338,19 @@ export function verifyGrounding(
   const issues: string[] = [];
   const citations: string[] = [];
 
-  // 1. No tools called -> unavailable.
+  // 1. Empty final answer cannot be verified.
+  if (!answer || answer.trim() === "") {
+    return {
+      citations: [],
+      confidence: 0,
+      hasSources: false,
+      issues: ["Final answer is empty."],
+      status: "unverified",
+      verified: false,
+    };
+  }
+
+  // 2. No tools called -> unavailable.
   if (!toolResults || toolResults.length === 0) {
     return {
       citations: [],
@@ -352,7 +364,7 @@ export function verifyGrounding(
     };
   }
 
-  // 2. All tools errored -> unavailable.
+  // 3. All tools errored -> unavailable.
   const onlyErrors = toolResults.every(
     (tr) =>
       tr.result?.error ||
@@ -371,7 +383,7 @@ export function verifyGrounding(
     };
   }
 
-  // 3. Extract sources/records from each tool result.
+  // 4. Extract sources/records from each tool result.
   let totalSources = 0;
   for (const tr of toolResults) {
     const sources = tr.sources || extractSourcesFromResult(tr.result) || [];
