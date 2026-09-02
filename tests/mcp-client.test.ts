@@ -1,6 +1,10 @@
 /**
  * MCP client integration tests using real Night Worker.
  * Verifies v2 SDK Client can connect, list tools, and call tools.
+ *
+ * NOTE: These tests require a live Night Worker server (MCP_URL + MCP_TOKEN).
+ * They are automatically skipped in CI where no server is available.
+ * To run locally: set NIGHT_WORKER_URL and NIGHT_WORKER_TOKEN.
  */
 
 import assert from "node:assert/strict";
@@ -12,7 +16,10 @@ const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
   "e2e-test-token-must-be-at-least-32-chars-long";
 
-test("MCP client v2 connects to real Night Worker and lists tools", async () => {
+/** Run test when NW is available, skip otherwise. */
+const it = process.env.NIGHT_WORKER_URL ? test : test.skip;
+
+it("MCP client v2 connects to real Night Worker and lists tools", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -35,7 +42,7 @@ test("MCP client v2 connects to real Night Worker and lists tools", async () => 
   }
 });
 
-test("MCP client v2 calls search_records and parses text content", async () => {
+it("MCP client v2 calls search_records and parses text content", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -58,7 +65,7 @@ test("MCP client v2 calls search_records and parses text content", async () => {
   }
 });
 
-test("MCP client v2 group_records returns real brand keys", async () => {
+it("MCP client v2 group_records returns real brand keys", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -82,7 +89,7 @@ test("MCP client v2 group_records returns real brand keys", async () => {
   }
 });
 
-test("MCP client v2 aggregate_data rejects invalid metric", async () => {
+it("MCP client v2 aggregate_data rejects invalid metric", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -98,7 +105,7 @@ test("MCP client v2 aggregate_data rejects invalid metric", async () => {
   }
 });
 
-test("MCP client v2 rejects connection with invalid auth token", async () => {
+it("MCP client v2 rejects connection with invalid auth token", async () => {
   await assert.rejects(
     getMcpTools({
       authToken: "WRONG-TOKEN-NOT-AT-LEAST-32-CHARS-LONG-X",

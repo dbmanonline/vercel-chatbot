@@ -48,8 +48,36 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Run unit tests (timeout + grounding + MCP client + lifecycle = 36 tests)
-        run: pnpm exec tsx --test tests/with-timeout.test.ts tests/grounding.test.ts tests/mcp-client.test.ts tests/mcp-client-lifecycle.test.ts
+      # ----- Night Worker for integration tests -----
+      - name: Clone Night Worker at main HEAD
+        uses: actions/checkout@v4
+        with:
+          repository: dbmanonline/night_worker
+          ref: ${{ vars.NIGHT_WORKER_COMMIT || 'main' }}
+          token: ${{ secrets.NIGHT_WORKER_REPO_TOKEN || github.token }}
+          path: night_worker
+          fetch-depth: 1
+
+      - name: Install Night Worker
+        run: |
+          cd night_worker && npm install --frozen-lockfile 2>/dev/null || npm install
+
+      - name: Start Night Worker
+        run: |
+          cd night_worker && PORT=13579 MCP_ENABLED=true MCP_AUTH_TOKEN=ci-test-token-at-least-32-chars-long node server.js &
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:13579/health > /dev/null 2>&1; then
+              echo "NW server ready on port 13579"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run unit + integration tests (36 tests)
+        run: |
+          echo "NIGHT_WORKER_URL=http://localhost:13579/mcp" >> $GITHUB_ENV
+          echo "NIGHT_WORKER_TOKEN=ci-test-token-at-least-32-chars-long" >> $GITHUB_ENV
+          pnpm exec tsx --test tests/with-timeout.test.ts tests/grounding.test.ts tests/mcp-client.test.ts tests/mcp-client-lifecycle.test.ts
 
   # ============================================================
   # E2E Night Worker
@@ -141,11 +169,11 @@ jobs:
       - name: Start Night Worker
         if: steps.resolve_nw.outputs.SKIP_E2E == 'no'
         run: |
-          cd night_worker && pnpm start &
+          cd night_worker && PORT=13579 MCP_ENABLED=true MCP_AUTH_TOKEN=ci-test-token-at-least-32-chars-long node server.js &
           sleep 5
           for i in $(seq 1 20); do
             if curl -sf http://localhost:13579/health > /dev/null 2>&1; then
-              echo "NW server ready"
+              echo "NW server ready on port 13579"
               break
             fi
             sleep 2
@@ -162,10 +190,9 @@ jobs:
         if: steps.resolve_nw.outputs.SKIP_E2E == 'no'
         run: |
           echo "NIGHT_WORKER_URL=http://localhost:13579/mcp" >> $GITHUB_ENV
-          echo "NIGHT_WORKER_TOKEN=${{ secrets.NIGHT_WORKER_REPO_TOKEN || 'e2e-test-token-must-be-at-least-32-chars-long' }}" >> $GITHUB_ENV
+          echo "NIGHT_WORKER_TOKEN=ci-test-token-at-least-32-chars-long" >> $GITHUB_ENV
           echo "E2E_PROXY_URL=http://localhost:20128" >> $GITHUB_ENV
           echo "E2E_PROXY_KEY=${{ secrets.AI_GATEWAY_API_KEY || '' }}" >> $GITHUB_ENV
-          echo "NODE_ENV=development" >> $GITHUB_ENV
           echo "E2E_BYPASS_AUTH=1" >> $GITHUB_ENV
           echo "MCP_ENABLED=true" >> $GITHUB_ENV
 

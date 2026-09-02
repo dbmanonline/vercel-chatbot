@@ -14,6 +14,10 @@
  * wait for the SDK's *user-facing* promise, not the internal one.
  * To make sure no test is "cancelled by parent", we always end each
  * test with an awaited call to handle.close().
+ *
+ * NOTE: These tests require a live Night Worker server (MCP_URL + MCP_TOKEN).
+ * They are automatically skipped in CI where no server is available.
+ * To run locally: set NIGHT_WORKER_URL and NIGHT_WORKER_TOKEN.
  */
 
 import assert from "node:assert/strict";
@@ -26,7 +30,10 @@ const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
   "e2e-test-token-must-be-at-least-32-chars-long";
 
-test("MCP client closes after successful tool call", async () => {
+/** Run test when NW is available, skip otherwise. */
+const it = process.env.NIGHT_WORKER_URL ? test : test.skip;
+
+it("MCP client closes after successful tool call", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -42,7 +49,7 @@ test("MCP client closes after successful tool call", async () => {
   );
 });
 
-test("MCP client closes after error tool call", async () => {
+it("MCP client closes after error tool call", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -59,7 +66,7 @@ test("MCP client closes after error tool call", async () => {
   await handle.close();
 });
 
-test("MCP client close() is idempotent", async () => {
+it("MCP client close() is idempotent", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -69,7 +76,7 @@ test("MCP client close() is idempotent", async () => {
   await Promise.all([handle.close(), handle.close(), handle.close()]);
 });
 
-test("MCP client call rejects when per-call AbortSignal is already aborted", async () => {
+it("MCP client call rejects when per-call AbortSignal is already aborted", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -84,7 +91,7 @@ test("MCP client call rejects when per-call AbortSignal is already aborted", asy
   await handle.close();
 });
 
-test("MCP client call rejects with timeout when per-call timeoutMs expires", async () => {
+it("MCP client call rejects with timeout when per-call timeoutMs expires", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -98,7 +105,7 @@ test("MCP client call rejects with timeout when per-call timeoutMs expires", asy
   await handle.close();
 });
 
-test("MCP client per-call AbortSignal listener is removed after success (no leak)", async () => {
+it("MCP client per-call AbortSignal listener is removed after success (no leak)", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -131,7 +138,7 @@ test("MCP client per-call AbortSignal listener is removed after success (no leak
   await handle.close();
 });
 
-test("MCP client per-call AbortSignal listener is removed after timeout (no leak)", async () => {
+it("MCP client per-call AbortSignal listener is removed after timeout (no leak)", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -170,7 +177,7 @@ test("MCP client per-call AbortSignal listener is removed after timeout (no leak
   await handle.close();
 });
 
-test("MCP client handles abort signal fired DURING the tool call", async () => {
+it("MCP client handles abort signal fired DURING the tool call", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -191,7 +198,7 @@ test("MCP client handles abort signal fired DURING the tool call", async () => {
   await handle.close();
 });
 
-test("MCP client close() is idempotent - second close is a no-op", async () => {
+it("MCP client close() is idempotent - second close is a no-op", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
@@ -201,7 +208,7 @@ test("MCP client close() is idempotent - second close is a no-op", async () => {
   await handle.close(); // second close — must not throw
 });
 
-test("MCP client uses per-call timeoutMs, not just constructor timeout", async () => {
+it("MCP client uses per-call timeoutMs, not just constructor timeout", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
     serverUrl: MCP_URL,
