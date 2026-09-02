@@ -52,13 +52,35 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # ----- Night Worker for integration tests -----
-      - name: Clone Night Worker at main HEAD
+  # ============================================================
+  # Integration tests (requires Night Worker)
+  # Conditionally clones + starts NW, then runs 36 tests.
+  # Skips without NIGHT_WORKER_REPO_TOKEN (tests skip, not fail).
+  # ============================================================
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-typecheck-build
+    if: vars.NIGHT_WORKER_COMMIT != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Clone Night Worker
         uses: actions/checkout@v4
         with:
           repository: dbmanonline/night_worker
-          ref: ${{ vars.NIGHT_WORKER_COMMIT || 'main' }}
-          token: ${{ github.token }}
+          ref: ${{ vars.NIGHT_WORKER_COMMIT }}
+          token: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           path: night_worker
           fetch-depth: 1
 
@@ -71,13 +93,13 @@ jobs:
           cd night_worker && PORT=13579 MCP_ENABLED=true MCP_AUTH_TOKEN=ci-test-token-at-least-32-chars-long node server.js &
           for i in $(seq 1 20); do
             if curl -sf http://localhost:13579/health > /dev/null 2>&1; then
-              echo "NW server ready on port 13579"
+              echo "NW ready"
               break
             fi
             sleep 2
           done
 
-      - name: Run unit + integration tests (36 tests)
+      - name: Run tests with NW (36 tests)
         run: |
           echo "NIGHT_WORKER_URL=http://localhost:13579/mcp" >> $GITHUB_ENV
           echo "NIGHT_WORKER_TOKEN=ci-test-token-at-least-32-chars-long" >> $GITHUB_ENV
@@ -90,12 +112,12 @@ jobs:
   #   1. workflow_dispatch input
   #   2. repo variable NIGHT_WORKER_COMMIT
   #   3. git ls-remote on origin/main
-  # If NIGHT_WORKER_REPO_TOKEN is missing AND no SHA resolved -> NOT_RUN
-  # If SHA resolved but NW repo is private + no token -> FAIL
+  # If SHA resolved but NW repo private + no token -> FAIL
+  # If NW_URL missing -> SKIP
   # ============================================================
   e2e-night-worker:
     runs-on: ubuntu-latest
-    needs: unit-typecheck-build
+    needs: [unit-typecheck-build, integration-tests]
     steps:
       - uses: actions/checkout@v4
         with:
