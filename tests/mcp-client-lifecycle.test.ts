@@ -25,7 +25,8 @@ import { test } from "node:test";
 
 import { getMcpTools } from "../lib/mcp/client";
 
-const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579/mcp";
+const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579";
+const MCP_FULL_URL = MCP_URL.endsWith("/mcp") ? MCP_URL : `${MCP_URL}/mcp`;
 const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
   "e2e-test-token-must-be-at-least-32-chars-long";
@@ -36,7 +37,7 @@ const it = process.env.NIGHT_WORKER_URL ? test : test.skip;
 it("MCP client closes after successful tool call", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   const result = await handle.callTool("search_records", { limit: 1 });
@@ -52,7 +53,7 @@ it("MCP client closes after successful tool call", async () => {
 it("MCP client closes after error tool call", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   // Trigger a tool-error by sending an invalid metric.
@@ -69,7 +70,7 @@ it("MCP client closes after error tool call", async () => {
 it("MCP client close() is idempotent", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   // Close twice in parallel. Neither call may throw.
@@ -79,7 +80,7 @@ it("MCP client close() is idempotent", async () => {
 it("MCP client call rejects when per-call AbortSignal is already aborted", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   const ac = new AbortController();
@@ -94,7 +95,7 @@ it("MCP client call rejects when per-call AbortSignal is already aborted", async
 it("MCP client call rejects with timeout when per-call timeoutMs expires", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   // 1ms is impossibly small - any real network round trip will exceed it.
@@ -108,7 +109,7 @@ it("MCP client call rejects with timeout when per-call timeoutMs expires", async
 it("MCP client per-call AbortSignal listener is removed after success (no leak)", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   const ac = new AbortController();
@@ -141,7 +142,7 @@ it("MCP client per-call AbortSignal listener is removed after success (no leak)"
 it("MCP client per-call AbortSignal listener is removed after timeout (no leak)", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   const ac = new AbortController();
@@ -180,7 +181,7 @@ it("MCP client per-call AbortSignal listener is removed after timeout (no leak)"
 it("MCP client handles abort signal fired DURING the tool call", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   const ac = new AbortController();
@@ -201,7 +202,7 @@ it("MCP client handles abort signal fired DURING the tool call", async () => {
 it("MCP client close() is idempotent - second close is a no-op", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   await handle.close(); // first close
@@ -211,7 +212,7 @@ it("MCP client close() is idempotent - second close is a no-op", async () => {
 it("MCP client uses per-call timeoutMs, not just constructor timeout", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 60_000, // long constructor timeout
   });
   try {

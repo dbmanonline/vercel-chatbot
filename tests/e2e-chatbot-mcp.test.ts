@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
-const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579/mcp";
+const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579";
 const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
   "e2e-test-token-must-be-at-least-32-chars-long";

@@ -11,7 +11,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getMcpTools } from "../lib/mcp/client";
 
-const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579/mcp";
+const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579";
+const MCP_FULL_URL = MCP_URL.endsWith("/mcp") ? MCP_URL : `${MCP_URL}/mcp`;
 const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
   "e2e-test-token-must-be-at-least-32-chars-long";
@@ -22,7 +23,7 @@ const it = process.env.NIGHT_WORKER_URL ? test : test.skip;
 it("MCP client v2 connects to real Night Worker and lists tools", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   try {
@@ -45,7 +46,7 @@ it("MCP client v2 connects to real Night Worker and lists tools", async () => {
 it("MCP client v2 calls search_records and parses text content", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   try {
@@ -68,7 +69,7 @@ it("MCP client v2 calls search_records and parses text content", async () => {
 it("MCP client v2 group_records returns real brand keys", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   try {
@@ -92,7 +93,7 @@ it("MCP client v2 group_records returns real brand keys", async () => {
 it("MCP client v2 aggregate_data rejects invalid metric", async () => {
   const handle = await getMcpTools({
     authToken: MCP_TOKEN,
-    serverUrl: MCP_URL,
+    serverUrl: MCP_FULL_URL,
     timeoutMs: 10_000,
   });
   try {
@@ -109,7 +110,7 @@ it("MCP client v2 rejects connection with invalid auth token", async () => {
   await assert.rejects(
     getMcpTools({
       authToken: "WRONG-TOKEN-NOT-AT-LEAST-32-CHARS-LONG-X",
-      serverUrl: MCP_URL,
+      serverUrl: MCP_FULL_URL,
     }),
     /Invalid token|Authorization|401|Unauthorized/i,
     "auth token must be enforced"

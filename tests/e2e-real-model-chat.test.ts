@@ -26,7 +26,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY ?? "";
 const IS_FAKE_KEY = !GATEWAY_KEY || GATEWAY_KEY === "placeholder-agent-shop-key";
-const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579/mcp";
+const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579";
 const MCP_TOKEN =
   process.env.NIGHT_WORKER_TOKEN ||
   "e2e-test-token-must-be-at-least-32-chars-long";
