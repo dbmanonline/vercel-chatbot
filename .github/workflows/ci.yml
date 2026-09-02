@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  actions: read
 
 env:
   # These are never used in production. Only for local/CI testing.
@@ -75,7 +76,16 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve Night Worker checkout token
+        id: resolve_nw
+        run: |
+          echo "CLONE_TOKEN=${{ secrets.NIGHT_WORKER_REPO_TOKEN }}" >> "$GITHUB_OUTPUT"
+          if [ -z "${{ secrets.NIGHT_WORKER_REPO_TOKEN }}" ]; then
+            echo "SKIP_REASON=NIGHT_WORKER_REPO_TOKEN secret not set — cross-repo checkout blocked" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Clone Night Worker
+        if: steps.resolve_nw.outputs.CLONE_TOKEN != ''
         uses: actions/checkout@v4
         with:
           repository: dbmanonline/night_worker
@@ -85,10 +95,12 @@ jobs:
           fetch-depth: 1
 
       - name: Install Night Worker
+        if: steps.resolve_nw.outputs.CLONE_TOKEN != ''
         run: |
           cd night_worker && npm install --frozen-lockfile 2>/dev/null || npm install
 
       - name: Start Night Worker
+        if: steps.resolve_nw.outputs.CLONE_TOKEN != ''
         run: |
           cd night_worker && PORT=13579 MCP_ENABLED=true MCP_AUTH_TOKEN=ci-test-token-at-least-32-chars-long node server.js &
           for i in $(seq 1 20); do
@@ -99,7 +111,8 @@ jobs:
             sleep 2
           done
 
-      - name: Run tests with NW (36 tests)
+      - name: Run tests with NW (42 tests)
+        if: steps.resolve_nw.outputs.CLONE_TOKEN != ''
         run: |
           echo "NIGHT_WORKER_URL=http://localhost:13579/mcp" >> $GITHUB_ENV
           echo "NIGHT_WORKER_TOKEN=ci-test-token-at-least-32-chars-long" >> $GITHUB_ENV
@@ -166,7 +179,13 @@ jobs:
             echo "SKIP_REASON=No NW token and no NIGHT_WORKER_COMMIT var — cannot resolve NW SHA" >> "$GITHUB_OUTPUT"
           else
             echo "sha=$REF" >> "$GITHUB_OUTPUT"
-            echo "SKIP_E2E=no" >> "$GITHUB_OUTPUT"
+            # Only attempt E2E if NIGHT_WORKER_REPO_TOKEN is also available
+            if [ -z "${{ secrets.NIGHT_WORKER_REPO_TOKEN }}" ]; then
+              echo "SKIP_E2E=NOT_RUN" >> "$GITHUB_OUTPUT"
+              echo "SKIP_REASON=NIGHT_WORKER_REPO_TOKEN secret not set — cross-repo checkout blocked" >> "$GITHUB_OUTPUT"
+            else
+              echo "SKIP_E2E=no" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       # ----- Checkout the resolved NW SHA -----
