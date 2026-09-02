@@ -12,6 +12,10 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   # These are never used in production. Only for local/CI testing.
   # Production uses Vercel AI Gateway with model keys configured in Vercel dashboard.
