@@ -21,8 +21,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/transport.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { setTimeout as delay } from "node:timers/promises";
 
 const GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY ?? "";
@@ -55,7 +54,9 @@ async function getExpectedCount(): Promise<number> {
       { timeout: 30_000 }
     );
     const content = Array.isArray(result.content) ? result.content[0] : result.content;
-    const text = typeof content === "string" ? content : content?.text || "";
+    const text = typeof content === "string"
+      ? content
+      : (content as any)?.text || "";
     const parsed = JSON.parse(text);
     return parsed.total ?? parsed.records?.length ?? 0;
   } finally {

@@ -17,8 +17,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/transport.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 
 const MCP_URL = process.env.NIGHT_WORKER_URL || "http://127.0.0.1:13579/mcp";
 const MCP_TOKEN =
@@ -65,7 +64,9 @@ async function getExpectedCount(): Promise<number> {
       { timeout: 30_000 }
     );
     const content = Array.isArray(result.content) ? result.content[0] : result.content;
-    const text = typeof content === "string" ? content : content?.text || "";
+    const text = typeof content === "string"
+      ? content
+      : (content as any)?.text || "";
     const parsed = JSON.parse(text);
     return parsed.total ?? parsed.records?.length ?? 0;
   } finally {
