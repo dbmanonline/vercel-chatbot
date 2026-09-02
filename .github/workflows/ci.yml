@@ -112,8 +112,6 @@ jobs:
       - name: Resolve Night Worker commit SHA
         id: resolve_nw
         env:
-          NW_REPO_TOKEN: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "sha=unknown" >> "$GITHUB_OUTPUT"
           echo "SKIP_E2E=no" >> "$GITHUB_OUTPUT"
@@ -130,16 +128,11 @@ jobs:
             REF="${{ vars.NIGHT_WORKER_COMMIT }}"
             echo "Using vars.NIGHT_WORKER_COMMIT: $REF"
           fi
-          # 3. resolve main HEAD via ls-remote
+          # 3. resolve main HEAD via ls-remote using github.token
           if [ -z "$REF" ]; then
-            if [ -n "$NW_REPO_TOKEN" ]; then
-              AUTH_URL="https://x-access-token:${NW_REPO_TOKEN}@github.com/dbmanonline/night_worker"
-              REF=$(git ls-remote "$AUTH_URL" main 2>/dev/null | cut -f1)
-              echo "Resolved via ls-remote: ${REF:-none}"
-            else
-              echo "No NIGHT_WORKER_REPO_TOKEN and no NIGHT_WORKER_COMMIT var — cannot resolve SHA"
-            fi
-          fi
+            AUTH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/dbmanonline/night_worker"
+            REF=$(git ls-remote "$AUTH_URL" main 2>/dev/null | cut -f1)
+            echo "Resolved via ls-remote: ${REF:-none}"
 
           if [ -z "$REF" ]; then
             echo "sha=unknown" >> "$GITHUB_OUTPUT"
@@ -157,7 +150,7 @@ jobs:
         with:
           repository: dbmanonline/night_worker
           ref: ${{ steps.resolve_nw.outputs.sha }}
-          token: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
+          token: ${{ github.token }}
           path: night_worker
           fetch-depth: 0
 
