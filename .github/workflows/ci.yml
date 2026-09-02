@@ -54,7 +54,7 @@ jobs:
         with:
           repository: dbmanonline/night_worker
           ref: ${{ vars.NIGHT_WORKER_COMMIT || 'main' }}
-          token: ${{ secrets.NIGHT_WORKER_REPO_TOKEN || github.token }}
+          token: ${{ github.token }}
           path: night_worker
           fetch-depth: 1
 
