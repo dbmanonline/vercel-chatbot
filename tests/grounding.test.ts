@@ -220,7 +220,10 @@ test("verifyGrounding: empty answer returns unverified", () => {
   const check = verifyGrounding("", []);
   assert.equal(check.status, "unverified");
   assert.equal(check.verified, false);
-  assert.ok(check.issues.some((i) => i.includes("empty")), JSON.stringify(check.issues));
+  assert.ok(
+    check.issues.some((i) => i.includes("empty")),
+    JSON.stringify(check.issues)
+  );
 });
 
 test("verifyGrounding: whitespace-only answer returns unverified", () => {
