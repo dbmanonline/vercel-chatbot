@@ -111,7 +111,6 @@ jobs:
       # ----- Resolve Night Worker commit SHA -----
       - name: Resolve Night Worker commit SHA
         id: resolve_nw
-        env:
         run: |
           echo "sha=unknown" >> "$GITHUB_OUTPUT"
           echo "SKIP_E2E=no" >> "$GITHUB_OUTPUT"
@@ -133,6 +132,7 @@ jobs:
             AUTH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/dbmanonline/night_worker"
             REF=$(git ls-remote "$AUTH_URL" main 2>/dev/null | cut -f1)
             echo "Resolved via ls-remote: ${REF:-none}"
+          fi
 
           if [ -z "$REF" ]; then
             echo "sha=unknown" >> "$GITHUB_OUTPUT"
