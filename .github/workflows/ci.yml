@@ -176,7 +176,7 @@ jobs:
         with:
           repository: dbmanonline/night_worker
           ref: ${{ steps.resolve_nw.outputs.sha }}
-          token: ${{ github.token }}
+          token: ${{ secrets.NIGHT_WORKER_REPO_TOKEN }}
           path: night_worker
           fetch-depth: 0
 
